@@ -5,7 +5,7 @@ const path = require('path')
 const { apply } = require('.')
 
 const cmd = command(
-  'ghoops',
+  'octoops',
   summary('Declarative GitHub repo configuration using the gh CLI'),
   flag('--dry-run|-n', 'Show what would change without making changes'),
   flag('--audit', 'Write an audit log to audits/<timestamp>.log'),

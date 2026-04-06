@@ -1,0 +1,20 @@
+{
+  "org": "mafintosh",
+  "repos": [
+    {
+      "name": "octoops",
+      "private": false,
+      "merging": {
+        "squashOnly": true,
+        "deleteBranchOnMerge": true
+      },
+      "npm": {
+        "package": "bare-test-package",
+        "trustedPublishing": {
+          "workflow": "publish.yml",
+          "environment": "npm"
+        }
+      }
+    }
+  ]
+}

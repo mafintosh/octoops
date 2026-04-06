@@ -25,7 +25,7 @@ async function apply(config, opts = {}) {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-')
     const logPath = path.join(dir, stamp + '.log')
     auditStream = fs.createWriteStream(logPath)
-    audit('ghoops ' + (dry ? '--dry-run ' : '') + 'started at ' + new Date().toISOString())
+    audit('octoops ' + (dry ? '--dry-run ' : '') + 'started at ' + new Date().toISOString())
     audit('config: ' + JSON.stringify(config, null, 2))
   }
 
@@ -482,7 +482,7 @@ async function ensureNpmPackage(pkg, dry) {
   print(dry, 'npm-publish', pkg, 'placeholder 0.0.0')
   if (dry) return
 
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ghoops-'))
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'octoops-'))
   try {
     fs.writeFileSync(
       path.join(tmp, 'package.json'),

@@ -1,10 +1,10 @@
 {
-  "name": "ghoops",
+  "name": "octoops",
   "version": "0.0.0",
   "description": "Declarative GitHub repo configuration using the gh CLI",
   "main": "index.js",
   "bin": {
-    "ghoops": "./bin.js"
+    "octoops": "./bin.js"
   },
   "scripts": {
     "format": "prettier --write .",
@@ -19,12 +19,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/mafintosh/ghoops.git"
+    "url": "https://github.com/mafintosh/octoops.git"
   },
   "author": "Mathias Buus (@mafintosh)",
   "license": "Apache-2.0",
   "bugs": {
-    "url": "https://github.com/mafintosh/ghoops/issues"
+    "url": "https://github.com/mafintosh/octoops/issues"
   },
-  "homepage": "https://github.com/mafintosh/ghoops"
+  "homepage": "https://github.com/mafintosh/octoops"
 }

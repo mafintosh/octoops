@@ -1,7 +1,7 @@
-# ghoops spec
+# octoops spec
 
 A CLI tool + Node module for managing GitHub repo configuration declaratively.
-You maintain a JSON file describing desired state. Running `ghoops config.json`
+You maintain a JSON file describing desired state. Running `octoops config.json`
 reconciles actual state with desired state using `gh api` calls.
 
 ## JSON schema
@@ -74,7 +74,7 @@ reconciles actual state with desired state using `gh api` calls.
 - Idempotent — safe to run repeatedly
 - Prints what it's doing, skips repos/fields with no changes
 - Fails fast on `gh` errors
-- Dry-run mode: `ghoops --dry-run config.json` — reads current state, prints
+- Dry-run mode: `octoops --dry-run config.json` — reads current state, prints
   what would change, makes no writes
 
 ## Permissions

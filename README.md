@@ -1,19 +1,19 @@
-# ghoops
+# octoops
 
 Declarative GitHub repo configuration using the `gh` CLI.
 
-Maintain a JSON config describing desired state for your org's repos. Running `ghoops` reconciles actual state with desired state using `gh api` calls. Idempotent and safe to run repeatedly.
+Maintain a JSON config describing desired state for your org's repos. Running `octoops` reconciles actual state with desired state using `gh api` calls. Idempotent and safe to run repeatedly.
 
 ```
-npm install -g ghoops
+npm install -g octoops
 ```
 
 ## Usage
 
 ```bash
-ghoops config.json
-ghoops --dry-run config.json
-ghoops --audit config.json
+octoops config.json
+octoops --dry-run config.json
+octoops --audit config.json
 ```
 
 ## Configuration
@@ -114,7 +114,7 @@ Fields that accept a string will resolve against `presets`.
 ## Programmatic usage
 
 ```js
-const { apply } = require('ghoops')
+const { apply } = require('octoops')
 
 await apply(config, {
   dry: false,
