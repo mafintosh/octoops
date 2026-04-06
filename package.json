@@ -1,0 +1,30 @@
+{
+  "name": "ghoops",
+  "version": "0.0.0",
+  "description": "Declarative GitHub repo configuration using the gh CLI",
+  "main": "index.js",
+  "bin": {
+    "ghoops": "./bin.js"
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "lint": "prettier --check ."
+  },
+  "dependencies": {
+    "paparam": "^1.10.1"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "prettier-config-holepunch": "^2.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mafintosh/ghoops.git"
+  },
+  "author": "Mathias Buus (@mafintosh)",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/mafintosh/ghoops/issues"
+  },
+  "homepage": "https://github.com/mafintosh/ghoops"
+}
