@@ -137,6 +137,11 @@ async function reconcile(org, repo, prev, dry, done) {
   }
   if (repo.teams) done.teams = repo.teams
 
+  if (current && repo.collaborators && changed(repo.collaborators, prev.collaborators)) {
+    await reconcileCollaborators(org, repo.name, repo.collaborators, dry)
+  }
+  if (repo.collaborators) done.collaborators = repo.collaborators
+
   if (changed(repo.branchProtection, prev.branchProtection)) {
     for (const rule of repo.branchProtection || []) {
       if (current) await reconcileBranchProtection(org, repo.name, rule, dry)
@@ -238,6 +243,48 @@ async function reconcileTeams(org, name, desired, dry) {
     print(dry, 'remove-team', `${org}/${name}`, slug)
     if (!dry)
       await gh(['api', `orgs/${org}/teams/${slug}/repos/${org}/${name}`, '--method', 'DELETE'])
+  }
+}
+
+async function reconcileCollaborators(org, name, desired, dry) {
+  const current = await getCollaborators(org, name)
+  const currentMap = new Map(current.map((c) => [c.login, c.role_name]))
+  const desiredMap = new Map(
+    desired.map((c) => [c.username, PERMISSIONS[c.permission] || c.permission])
+  )
+
+  for (const [username, perm] of desiredMap) {
+    if (currentMap.get(username) === perm) continue
+    print(dry, 'collaborator', `${org}/${name}`, `${username} -> ${perm}`)
+    if (!dry)
+      await gh(
+        [
+          'api',
+          `repos/${org}/${name}/collaborators/${username}`,
+          '--method',
+          'PUT',
+          '--input',
+          '-'
+        ],
+        { body: { permission: perm } }
+      )
+  }
+
+  for (const [username] of currentMap) {
+    if (desiredMap.has(username)) continue
+    print(dry, 'remove-collaborator', `${org}/${name}`, username)
+    if (!dry)
+      await gh(['api', `repos/${org}/${name}/collaborators/${username}`, '--method', 'DELETE'])
+  }
+}
+
+async function getCollaborators(org, name) {
+  try {
+    return JSON.parse(
+      await gh(['api', `repos/${org}/${name}/collaborators?affiliation=direct`, '--paginate'])
+    )
+  } catch {
+    return []
   }
 }
 

@@ -127,6 +127,26 @@ Fields that accept a string will resolve against `presets`.
 
 Org teams are reconciled before repos. Parent teams should come before children in the array. Members not in the list are removed.
 
+### Add individual collaborators to a repo
+
+```json
+{
+  "org": "my-org",
+  "repos": [
+    {
+      "name": "secret-project",
+      "private": true,
+      "collaborators": [
+        { "username": "alice", "permission": "admin" },
+        { "username": "bob", "permission": "write" }
+      ]
+    }
+  ]
+}
+```
+
+Only direct collaborators are managed. Org-level implicit access is ignored. Unlisted direct collaborators are removed.
+
 ### Minimal repo with just teams and topics
 
 ```json
