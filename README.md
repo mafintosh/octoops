@@ -92,6 +92,41 @@ Fields that accept a string will resolve against `presets`.
 }
 ```
 
+### Manage org teams and members
+
+```json
+{
+  "org": "my-org",
+  "teams": [
+    {
+      "name": "engineering",
+      "description": "All engineers",
+      "privacy": "closed",
+      "members": [
+        { "username": "alice", "role": "maintainer" },
+        { "username": "bob", "role": "member" }
+      ]
+    },
+    {
+      "name": "backend",
+      "parent": "engineering",
+      "members": [
+        { "username": "alice", "role": "maintainer" },
+        { "username": "charlie", "role": "member" }
+      ]
+    },
+    {
+      "name": "devops",
+      "parent": "engineering",
+      "members": [{ "username": "dave", "role": "maintainer" }]
+    }
+  ],
+  "repos": [{ "name": "api", "teams": [{ "name": "backend", "permission": "write" }] }]
+}
+```
+
+Org teams are reconciled before repos. Parent teams should come before children in the array. Members not in the list are removed.
+
 ### Minimal repo with just teams and topics
 
 ```json

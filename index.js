@@ -32,6 +32,14 @@ async function apply(config, opts = {}) {
   const presets = config.presets || {}
 
   try {
+    if (config.teams && changed(config.teams, state._teams)) {
+      await reconcileOrgTeams(config.org, config.teams, dry)
+      if (!dry) {
+        state._teams = config.teams
+        if (opts.statePath) saveState(opts.statePath, state)
+      }
+    }
+
     for (const raw of config.repos) {
       const repo = resolve(raw, presets)
       const key = config.org + '/' + repo.name
@@ -230,6 +238,98 @@ async function reconcileTeams(org, name, desired, dry) {
     print(dry, 'remove-team', `${org}/${name}`, slug)
     if (!dry)
       await gh(['api', `orgs/${org}/teams/${slug}/repos/${org}/${name}`, '--method', 'DELETE'])
+  }
+}
+
+async function reconcileOrgTeams(org, teams, dry) {
+  for (const team of teams) {
+    const slug = slugify(team.name)
+    const existing = await getOrgTeam(org, slug)
+
+    if (!existing) {
+      print(dry, 'create-team', org, team.name)
+      if (!dry) {
+        const body = { name: team.name, privacy: team.privacy || 'closed' }
+        if (team.description) body.description = team.description
+        if (team.parent) {
+          const parent = await getOrgTeam(org, slugify(team.parent))
+          if (parent) body.parent_team_id = parent.id
+        }
+        await gh(['api', `orgs/${org}/teams`, '--method', 'POST', '--input', '-'], { body })
+      }
+    } else {
+      const patch = {}
+      if (team.description !== undefined && team.description !== existing.description) {
+        patch.description = team.description
+      }
+      if (team.privacy && team.privacy !== existing.privacy) {
+        patch.privacy = team.privacy
+      }
+      if (team.parent) {
+        const parent = await getOrgTeam(org, slugify(team.parent))
+        if (parent && (!existing.parent || existing.parent.id !== parent.id)) {
+          patch.parent_team_id = parent.id
+        }
+      }
+      if (Object.keys(patch).length) {
+        print(dry, 'update-team', org, team.name)
+        if (!dry)
+          await gh(['api', `orgs/${org}/teams/${slug}`, '--method', 'PATCH', '--input', '-'], {
+            body: patch
+          })
+      }
+    }
+
+    if (!team.members) continue
+
+    const currentMembers = await getOrgTeamMembers(org, slug)
+    const currentMap = new Map(currentMembers.map((m) => [m.login, m.role]))
+    const desiredMap = new Map(team.members.map((m) => [m.username, m.role || 'member']))
+
+    for (const [username, role] of desiredMap) {
+      if (currentMap.get(username) === role) continue
+      print(dry, 'team-member', `${org}/${slug}`, `${username} -> ${role}`)
+      if (!dry)
+        await gh([
+          'api',
+          `orgs/${org}/teams/${slug}/memberships/${username}`,
+          '--method',
+          'PUT',
+          '-f',
+          `role=${role}`
+        ])
+    }
+
+    for (const [username] of currentMap) {
+      if (desiredMap.has(username)) continue
+      print(dry, 'remove-team-member', `${org}/${slug}`, username)
+      if (!dry)
+        await gh(['api', `orgs/${org}/teams/${slug}/memberships/${username}`, '--method', 'DELETE'])
+    }
+  }
+}
+
+async function getOrgTeam(org, slug) {
+  try {
+    return JSON.parse(await gh(['api', `orgs/${org}/teams/${slug}`]))
+  } catch {
+    return null
+  }
+}
+
+async function getOrgTeamMembers(org, slug) {
+  try {
+    const members = JSON.parse(await gh(['api', `orgs/${org}/teams/${slug}/members`, '--paginate']))
+    const result = []
+    for (const m of members) {
+      const membership = JSON.parse(
+        await gh(['api', `orgs/${org}/teams/${slug}/memberships/${m.login}`])
+      )
+      result.push({ login: m.login, role: membership.role })
+    }
+    return result
+  } catch {
+    return []
   }
 }
 
