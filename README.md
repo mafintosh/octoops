@@ -11,10 +11,19 @@ npm install -g octoops
 ## Usage
 
 ```bash
-octoops config.json
-octoops --dry-run config.json
-octoops --audit config.json
+octoops apply config.json
+octoops apply --dry-run config.json
+octoops apply --audit config.json
 ```
+
+Import an existing org into a config file:
+
+```bash
+octoops import my-org > config.json
+octoops import my-org -o config.json
+```
+
+Respects GitHub API rate limits automatically.
 
 ## Configuration
 
@@ -169,13 +178,15 @@ Only direct collaborators are managed. Org-level implicit access is ignored. Unl
 ## Programmatic usage
 
 ```js
-const { apply } = require('octoops')
+const { apply, importOrg } = require('octoops')
 
 await apply(config, {
   dry: false,
   statePath: './config.state.json',
   audit: true
 })
+
+const config = await importOrg('my-org')
 ```
 
 A state file is written next to the config to track what was last applied. On partial failure, completed steps are saved so the next run picks up where it left off.

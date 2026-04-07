@@ -11,7 +11,203 @@ const PERMISSIONS = {
   admin: 'admin'
 }
 
-module.exports = { apply }
+module.exports = { apply, importOrg }
+
+const PERMISSIONS_REVERSE = {
+  pull: 'read',
+  push: 'write',
+  triage: 'triage',
+  maintain: 'maintain',
+  admin: 'admin'
+}
+
+async function importOrg(org) {
+  console.log('fetching org teams...')
+  const orgTeams = await importOrgTeams(org)
+
+  console.log('fetching repos...')
+  const repoNames = JSON.parse(await gh(['api', `orgs/${org}/repos`, '--paginate']))
+    .map((r) => r.name)
+    .sort()
+
+  const repos = []
+  for (let i = 0; i < repoNames.length; i++) {
+    const name = repoNames[i]
+    console.log(`importing ${name} (${i + 1}/${repoNames.length})...`)
+    await checkRateLimit()
+    repos.push(await importRepo(org, name))
+  }
+
+  const config = { org }
+  if (orgTeams.length) config.teams = orgTeams
+  config.repos = repos
+
+  return config
+}
+
+async function importOrgTeams(org) {
+  const teams = JSON.parse(await gh(['api', `orgs/${org}/teams`, '--paginate']))
+  const result = []
+
+  for (const team of teams) {
+    await checkRateLimit()
+    const entry = { name: team.name }
+    if (team.description) entry.description = team.description
+    if (team.privacy) entry.privacy = team.privacy
+    if (team.parent) entry.parent = team.parent.name
+
+    const members = JSON.parse(
+      await gh(['api', `orgs/${org}/teams/${team.slug}/members`, '--paginate'])
+    )
+    if (members.length) {
+      entry.members = []
+      for (const m of members) {
+        await checkRateLimit()
+        const membership = JSON.parse(
+          await gh(['api', `orgs/${org}/teams/${team.slug}/memberships/${m.login}`])
+        )
+        entry.members.push({ username: m.login, role: membership.role })
+      }
+    }
+
+    result.push(entry)
+  }
+
+  return result
+}
+
+async function importRepo(org, name) {
+  const repo = JSON.parse(await gh(['api', `repos/${org}/${name}`]))
+  const entry = { name }
+
+  if (repo.description) entry.description = repo.description
+  entry.private = repo.private
+
+  const merging = {}
+  if (!repo.allow_merge_commit && !repo.allow_rebase_merge && repo.allow_squash_merge) {
+    merging.squashOnly = true
+  }
+  if (repo.delete_branch_on_merge) merging.deleteBranchOnMerge = true
+  if (Object.keys(merging).length) entry.merging = merging
+
+  const { names: topics } = JSON.parse(await gh(['api', `repos/${org}/${name}/topics`]))
+  if (topics.length) entry.topics = topics
+
+  const teams = JSON.parse(await gh(['api', `repos/${org}/${name}/teams`, '--paginate']))
+  if (teams.length) {
+    entry.teams = teams.map((t) => ({
+      name: t.name,
+      permission: PERMISSIONS_REVERSE[t.permission] || t.permission
+    }))
+  }
+
+  const collabs = await getCollaborators(org, name)
+  if (collabs.length) {
+    entry.collaborators = collabs.map((c) => ({
+      username: c.login,
+      permission: PERMISSIONS_REVERSE[c.role_name] || c.role_name
+    }))
+  }
+
+  try {
+    const bp = JSON.parse(
+      await gh(['api', `repos/${org}/${name}/branches/${repo.default_branch}/protection`])
+    )
+    const rule = { branch: repo.default_branch }
+    if (bp.enforce_admins && bp.enforce_admins.enabled) rule.enforceAdmins = true
+    if (bp.required_pull_request_reviews) {
+      const pr = bp.required_pull_request_reviews
+      rule.requiredReviews = {}
+      if (pr.required_approving_review_count) {
+        rule.requiredReviews.approvals = pr.required_approving_review_count
+      }
+      if (pr.dismiss_stale_reviews) rule.requiredReviews.dismissStale = true
+      if (pr.require_code_owner_reviews) rule.requiredReviews.codeOwners = true
+    }
+    entry.branchProtection = [rule]
+  } catch {}
+
+  try {
+    const { environments } = JSON.parse(await gh(['api', `repos/${org}/${name}/environments`]))
+    if (environments && environments.length) {
+      entry.environments = []
+      for (const env of environments) {
+        const e = { name: env.name }
+        const reviewers = (env.protection_rules || [])
+          .flatMap((r) => r.reviewers || [])
+          .filter((r) => r.type === 'Team')
+          .map((r) => ({ team: r.reviewer.name }))
+        if (reviewers.length) e.reviewers = reviewers
+        entry.environments.push(e)
+      }
+    }
+  } catch {}
+
+  try {
+    const rulesets = JSON.parse(await gh(['api', `repos/${org}/${name}/rulesets`]))
+    if (rulesets.length) {
+      entry.rulesets = []
+      for (const rs of rulesets) {
+        await checkRateLimit()
+        const full = JSON.parse(await gh(['api', `repos/${org}/${name}/rulesets/${rs.id}`]))
+        const r = { name: full.name }
+        if (full.target && full.target !== 'branch') r.target = full.target
+        if (full.enforcement && full.enforcement !== 'active') r.enforcement = full.enforcement
+        if (full.conditions && full.conditions.ref_name) {
+          const ref = full.conditions.ref_name
+          if (ref.include && JSON.stringify(ref.include) !== '["~DEFAULT_BRANCH"]') {
+            r.include = ref.include
+          }
+          if (ref.exclude && ref.exclude.length) r.exclude = ref.exclude
+        }
+        for (const rule of full.rules || []) {
+          if (rule.type === 'deletion') r.preventDeletion = true
+          if (rule.type === 'non_fast_forward') r.preventForcePush = true
+          if (rule.type === 'pull_request' && rule.parameters) {
+            r.requirePR = {}
+            if (rule.parameters.required_approving_review_count) {
+              r.requirePR.approvals = rule.parameters.required_approving_review_count
+            }
+            if (rule.parameters.dismiss_stale_reviews_on_push) r.requirePR.dismissStale = true
+            if (rule.parameters.require_code_owner_review) r.requirePR.codeOwners = true
+            if (rule.parameters.require_last_push_approval) r.requirePR.lastPushApproval = true
+            if (rule.parameters.required_review_thread_resolution) r.requirePR.resolveThreads = true
+          }
+          if (rule.type === 'file_path_restriction' && rule.parameters) {
+            r.filePathRestrictions = rule.parameters.restricted_file_paths
+          }
+          if (rule.type === 'required_status_checks' && rule.parameters) {
+            r.requiredStatusChecks = {
+              strict: rule.parameters.strict_required_status_checks_policy || false,
+              checks: (rule.parameters.required_status_checks || []).map((c) => c.context)
+            }
+          }
+        }
+        if (full.bypass_actors && full.bypass_actors.length) {
+          r.bypassActors = full.bypass_actors.map((a) => ({
+            id: a.actor_id,
+            type: a.actor_type,
+            mode: a.bypass_mode
+          }))
+        }
+        entry.rulesets.push(r)
+      }
+    }
+  } catch {}
+
+  return entry
+}
+
+async function checkRateLimit() {
+  const data = JSON.parse(await gh(['api', 'rate_limit']))
+  const core = data.resources.core
+  if (core.remaining > 100) return
+  const reset = core.reset * 1000
+  const wait = reset - Date.now() + 1000
+  if (wait <= 0) return
+  console.log(`rate limit low (${core.remaining} remaining), waiting ${Math.ceil(wait / 1000)}s...`)
+  await new Promise((resolve) => setTimeout(resolve, wait))
+}
 
 let auditStream = null
 
