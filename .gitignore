@@ -5,3 +5,4 @@ coverage
 package-lock.json
 test.json
 test.state.json
+example.state.json
