@@ -244,6 +244,7 @@ function seed(config, opts = {}) {
     const repo = resolve(raw, presets)
     const key = config.org + '/' + repo.name
     const entry = {}
+    if (repo.archived) entry.archived = true
     if (repo.description !== undefined) entry.description = repo.description
     if (repo.private !== undefined) entry.private = repo.private
     if (repo.merging) entry.merging = repo.merging
@@ -335,6 +336,12 @@ async function apply(config, opts = {}) {
       const done = {}
       try {
         await reconcile(config.org, repo, prev, dry, done, opts)
+      } catch (err) {
+        if (err.message && err.message.includes('archived')) {
+          print(dry, 'skip-archived', `${config.org}/${repo.name}`)
+          continue
+        }
+        throw err
       } finally {
         if (!dry && Object.keys(done).length) {
           state[key] = Object.assign(prev, done)
@@ -391,6 +398,7 @@ function changed(a, b) {
 }
 
 function repoChanged(repo, prev) {
+  if (repo.archived && !prev.archived) return true
   const settings = { description: repo.description, private: repo.private, merging: repo.merging }
   const prevSettings = { description: prev.description, private: prev.private, merging: prev.merging }
   if (changed(settings, prevSettings)) return true
@@ -406,6 +414,16 @@ function repoChanged(repo, prev) {
 
 async function reconcile(org, repo, prev, dry, done, opts) {
   if (!repoChanged(repo, prev)) return
+
+  if (repo.archived && !prev.archived) {
+    print(dry, 'archive', `${org}/${repo.name}`)
+    if (!dry)
+      await gh(['api', `repos/${org}/${repo.name}`, '--method', 'PATCH', '--input', '-'], {
+        body: { archived: true }
+      })
+    done.archived = true
+    return
+  }
 
   let current = Object.keys(prev).length > 0
 
