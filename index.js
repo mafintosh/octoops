@@ -271,7 +271,7 @@ async function apply(config, opts = {}) {
       for (const team of config.teams) {
         const key = slugify(team.name)
         if (changed(team, teamState[key])) {
-          await reconcileOrgTeam(config.org, team, dry)
+          await reconcileOrgTeam(config.org, team, teamState[key], dry)
           if (!dry) {
             teamState[key] = team
             teamsChanged = true
@@ -350,27 +350,28 @@ function repoChanged(repo, prev) {
   const settings = { description: repo.description, private: repo.private, merging: repo.merging }
   const prevSettings = { description: prev.description, private: prev.private, merging: prev.merging }
   if (changed(settings, prevSettings)) return true
-  if (repo.topics && changed(repo.topics, prev.topics)) return true
-  if (repo.teams && changed(repo.teams, prev.teams)) return true
-  if (repo.collaborators && changed(repo.collaborators, prev.collaborators)) return true
+  if ((repo.topics || prev.topics) && changed(repo.topics, prev.topics)) return true
+  if ((repo.teams || prev.teams) && changed(repo.teams, prev.teams)) return true
+  if ((repo.collaborators || prev.collaborators) && changed(repo.collaborators, prev.collaborators)) return true
   if (changed(repo.branchProtection, prev.branchProtection)) return true
   if (changed(repo.environments, prev.environments)) return true
-  if (repo.rulesets && changed(repo.rulesets, prev.rulesets)) return true
-  if (repo.npm && changed(repo.npm, prev.npm)) return true
+  if ((repo.rulesets || prev.rulesets) && changed(repo.rulesets, prev.rulesets)) return true
+  if ((repo.npm || prev.npm) && changed(repo.npm, prev.npm)) return true
   return false
 }
 
 async function reconcile(org, repo, prev, dry, done) {
   if (!repoChanged(repo, prev)) return
 
-  let current = await getRepo(org, repo.name)
+  let current = Object.keys(prev).length > 0
 
   if (!current) {
-    print(dry, 'create', `${org}/${repo.name}`)
-    if (!dry) {
-      await createRepo(org, repo)
-      current = await getRepo(org, repo.name)
+    const existing = await getRepo(org, repo.name)
+    if (!existing) {
+      print(dry, 'create', `${org}/${repo.name}`)
+      if (!dry) await createRepo(org, repo)
     }
+    current = true
   }
 
   const settings = { description: repo.description, private: repo.private, merging: repo.merging }
@@ -381,7 +382,7 @@ async function reconcile(org, repo, prev, dry, done) {
   }
 
   if (current && changed(settings, prevSettings)) {
-    await reconcileSettings(org, repo, current, dry)
+    await reconcileSettings(org, repo, dry)
   }
   if (repo.description !== undefined) done.description = repo.description
   if (repo.private !== undefined) done.private = repo.private
@@ -392,15 +393,15 @@ async function reconcile(org, repo, prev, dry, done) {
   }
   if (repo.topics) done.topics = repo.topics
 
-  if (current && repo.teams && changed(repo.teams, prev.teams)) {
-    await reconcileTeams(org, repo.name, repo.teams, dry)
+  if (current && (repo.teams || prev.teams) && changed(repo.teams, prev.teams)) {
+    await reconcileTeams(org, repo.name, repo.teams || [], prev.teams, dry)
   }
-  if (repo.teams) done.teams = repo.teams
+  done.teams = repo.teams
 
-  if (current && repo.collaborators && changed(repo.collaborators, prev.collaborators)) {
-    await reconcileCollaborators(org, repo.name, repo.collaborators, dry)
+  if (current && (repo.collaborators || prev.collaborators) && changed(repo.collaborators, prev.collaborators)) {
+    await reconcileCollaborators(org, repo.name, repo.collaborators || [], prev.collaborators, dry)
   }
-  if (repo.collaborators) done.collaborators = repo.collaborators
+  done.collaborators = repo.collaborators
 
   if (changed(repo.branchProtection, prev.branchProtection)) {
     for (const rule of repo.branchProtection || []) {
@@ -427,31 +428,19 @@ async function reconcile(org, repo, prev, dry, done) {
   if (repo.npm) done.npm = repo.npm
 }
 
-async function reconcileSettings(org, repo, current, dry) {
+async function reconcileSettings(org, repo, dry) {
   const patch = {}
 
-  if (repo.description !== undefined && repo.description !== current.description) {
-    patch.description = repo.description
-  }
-  if (repo.private !== undefined && repo.private !== current.private) {
-    patch.private = repo.private
-  }
+  if (repo.description !== undefined) patch.description = repo.description
+  if (repo.private !== undefined) patch.private = repo.private
   if (repo.merging) {
     const m = repo.merging
     if (m.squashOnly !== undefined) {
-      if (m.squashOnly) {
-        if (!current.allow_squash_merge) patch.allow_squash_merge = true
-        if (current.allow_merge_commit) patch.allow_merge_commit = false
-        if (current.allow_rebase_merge) patch.allow_rebase_merge = false
-      } else {
-        if (!current.allow_merge_commit) patch.allow_merge_commit = true
-        if (!current.allow_rebase_merge) patch.allow_rebase_merge = true
-      }
+      patch.allow_squash_merge = !!m.squashOnly
+      patch.allow_merge_commit = !m.squashOnly
+      patch.allow_rebase_merge = !m.squashOnly
     }
-    if (
-      m.deleteBranchOnMerge !== undefined &&
-      m.deleteBranchOnMerge !== current.delete_branch_on_merge
-    ) {
+    if (m.deleteBranchOnMerge !== undefined) {
       patch.delete_branch_on_merge = m.deleteBranchOnMerge
     }
   }
@@ -466,10 +455,6 @@ async function reconcileSettings(org, repo, current, dry) {
 }
 
 async function reconcileTopics(org, name, topics, dry) {
-  const { names: current } = await gh(['api', `repos/${org}/${name}/topics`]).then(JSON.parse)
-  const sorted = [...topics].sort()
-  if (JSON.stringify([...current].sort()) === JSON.stringify(sorted)) return
-
   print(dry, 'topics', `${org}/${name}`, topics.join(', '))
   if (!dry)
     await gh(['api', `repos/${org}/${name}/topics`, '--method', 'PUT', '--input', '-'], {
@@ -477,15 +462,14 @@ async function reconcileTopics(org, name, topics, dry) {
     })
 }
 
-async function reconcileTeams(org, name, desired, dry) {
-  const current = await getTeams(org, name)
-  const currentMap = new Map(current.map((t) => [t.slug, t.permission]))
+async function reconcileTeams(org, name, desired, prev, dry) {
+  const prevMap = new Map((prev || []).map((t) => [slugify(t.name), PERMISSIONS[t.permission] || t.permission]))
   const desiredMap = new Map(
     desired.map((t) => [slugify(t.name), PERMISSIONS[t.permission] || t.permission])
   )
 
   for (const [slug, perm] of desiredMap) {
-    if (currentMap.get(slug) === perm) continue
+    if (prevMap.get(slug) === perm) continue
     print(dry, 'team', `${org}/${name}`, `${slug} -> ${perm}`)
     if (!dry)
       await gh([
@@ -498,7 +482,7 @@ async function reconcileTeams(org, name, desired, dry) {
       ])
   }
 
-  for (const [slug] of currentMap) {
+  for (const [slug] of prevMap) {
     if (desiredMap.has(slug)) continue
     print(dry, 'remove-team', `${org}/${name}`, slug)
     if (!dry)
@@ -506,15 +490,14 @@ async function reconcileTeams(org, name, desired, dry) {
   }
 }
 
-async function reconcileCollaborators(org, name, desired, dry) {
-  const current = await getCollaborators(org, name)
-  const currentMap = new Map(current.map((c) => [c.login, c.role_name]))
+async function reconcileCollaborators(org, name, desired, prev, dry) {
+  const prevMap = new Map((prev || []).map((c) => [c.username, PERMISSIONS[c.permission] || c.permission]))
   const desiredMap = new Map(
     desired.map((c) => [c.username, PERMISSIONS[c.permission] || c.permission])
   )
 
   for (const [username, perm] of desiredMap) {
-    if (currentMap.get(username) === perm) continue
+    if (prevMap.get(username) === perm) continue
     print(dry, 'collaborator', `${org}/${name}`, `${username} -> ${perm}`)
     if (!dry)
       await gh(
@@ -530,7 +513,7 @@ async function reconcileCollaborators(org, name, desired, dry) {
       )
   }
 
-  for (const [username] of currentMap) {
+  for (const [username] of prevMap) {
     if (desiredMap.has(username)) continue
     print(dry, 'remove-collaborator', `${org}/${name}`, username)
     if (!dry)
@@ -548,7 +531,7 @@ async function getCollaborators(org, name) {
   }
 }
 
-async function reconcileOrgTeam(org, team, dry) {
+async function reconcileOrgTeam(org, team, prevTeam, dry) {
   const slug = slugify(team.name)
   const existing = await getOrgTeam(org, slug)
 
@@ -586,14 +569,13 @@ async function reconcileOrgTeam(org, team, dry) {
     }
   }
 
-  if (!team.members) return
+  if (!team.members || !changed(team.members, prevTeam && prevTeam.members)) return
 
-  const currentMembers = await getOrgTeamMembers(org, slug)
-  const currentMap = new Map(currentMembers.map((m) => [m.login, m.role]))
+  const prevMap = new Map((prevTeam && prevTeam.members || []).map((m) => [m.username, m.role || 'member']))
   const desiredMap = new Map(team.members.map((m) => [m.username, m.role || 'member']))
 
   for (const [username, role] of desiredMap) {
-    if (currentMap.get(username) === role) continue
+    if (prevMap.get(username) === role) continue
     print(dry, 'team-member', `${org}/${slug}`, `${username} -> ${role}`)
     if (!dry)
       await gh([
@@ -606,7 +588,7 @@ async function reconcileOrgTeam(org, team, dry) {
       ])
   }
 
-  for (const [username] of currentMap) {
+  for (const [username] of prevMap) {
     if (desiredMap.has(username)) continue
     print(dry, 'remove-team-member', `${org}/${slug}`, username)
     if (!dry)
