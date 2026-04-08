@@ -2,7 +2,7 @@
 
 const { command, summary, flag, arg } = require('paparam')
 const path = require('path')
-const { apply, importOrg } = require('.')
+const { apply, importOrg, seed } = require('.')
 
 const applyCmd = command(
   'apply',
@@ -39,11 +39,24 @@ const importCmd = command(
   }
 )
 
+const seedCmd = command(
+  'seed',
+  summary('Write current config to state without checking GitHub'),
+  arg('<config>', 'Path to config JSON file'),
+  function () {
+    const configPath = path.resolve(seedCmd.args.config)
+    const config = require(configPath)
+    const statePath = configPath.replace(/\.json$/, '.state.json')
+    seed(config, { statePath })
+  }
+)
+
 const cmd = command(
   'octoops',
   summary('Declarative GitHub repo configuration using the gh CLI'),
   applyCmd,
-  importCmd
+  importCmd,
+  seedCmd
 )
 
 cmd.parse()
