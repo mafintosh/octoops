@@ -339,6 +339,7 @@ async function apply(config, opts = {}) {
       } catch (err) {
         if (err.message && err.message.includes('archived')) {
           print(dry, 'skip-archived', `${config.org}/${repo.name}`)
+          done.archived = true
           continue
         }
         throw err
@@ -399,6 +400,7 @@ function changed(a, b) {
 
 function repoChanged(repo, prev) {
   if (repo.archived && !prev.archived) return true
+  if (repo.archived) return false
   const settings = { description: repo.description, private: repo.private, merging: repo.merging }
   const prevSettings = { description: prev.description, private: prev.private, merging: prev.merging }
   if (changed(settings, prevSettings)) return true
