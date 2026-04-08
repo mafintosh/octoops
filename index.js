@@ -369,7 +369,13 @@ async function reconcile(org, repo, prev, dry, done) {
     const existing = await getRepo(org, repo.name)
     if (!existing) {
       print(dry, 'create', `${org}/${repo.name}`)
-      if (!dry) await createRepo(org, repo)
+      if (!dry) {
+        await createRepo(org, repo)
+        await new Promise((resolve) => setTimeout(resolve, 2000))
+      }
+      // createRepo already sets description and visibility
+      if (repo.description !== undefined) prev.description = repo.description
+      if (repo.private !== undefined) prev.private = repo.private
     }
     current = true
   }
