@@ -9,6 +9,7 @@ const applyCmd = command(
   summary('Apply config to GitHub org'),
   flag('--dry-run|-n', 'Show what would change without making changes'),
   flag('--audit', 'Write an audit log to audits/<timestamp>.log'),
+  flag('--enterprise', 'Enable enterprise features (env reviewers on private repos)'),
   arg('<config>', 'Path to config JSON file'),
   async function () {
     const configPath = path.resolve(applyCmd.args.config)
@@ -17,7 +18,8 @@ const applyCmd = command(
     await apply(config, {
       dry: applyCmd.flags.dryRun,
       statePath,
-      audit: applyCmd.flags.audit
+      audit: applyCmd.flags.audit,
+      enterprise: applyCmd.flags.enterprise
     })
   }
 )

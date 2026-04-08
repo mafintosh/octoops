@@ -334,7 +334,7 @@ async function apply(config, opts = {}) {
       const prev = state[key] || {}
       const done = {}
       try {
-        await reconcile(config.org, repo, prev, dry, done)
+        await reconcile(config.org, repo, prev, dry, done, opts)
       } finally {
         if (!dry && Object.keys(done).length) {
           state[key] = Object.assign(prev, done)
@@ -404,7 +404,7 @@ function repoChanged(repo, prev) {
   return false
 }
 
-async function reconcile(org, repo, prev, dry, done) {
+async function reconcile(org, repo, prev, dry, done, opts) {
   if (!repoChanged(repo, prev)) return
 
   let current = Object.keys(prev).length > 0
@@ -461,11 +461,18 @@ async function reconcile(org, repo, prev, dry, done) {
   if (repo.branchProtection) done.branchProtection = repo.branchProtection
 
   if (changed(repo.environments, prev.environments)) {
-    for (const env of repo.environments || []) {
-      if (current) await reconcileEnvironment(org, repo.name, env, dry)
+    const hasReviewers = (repo.environments || []).some((e) => e.reviewers && e.reviewers.length)
+    const skip = hasReviewers && repo.private !== false && !opts.enterprise
+
+    if (skip) {
+      print(dry, 'skip-environments', `${org}/${repo.name}`, 'requires enterprise for private repos with reviewers')
+    } else {
+      for (const env of repo.environments || []) {
+        if (current) await reconcileEnvironment(org, repo.name, env, dry)
+      }
+      if (repo.environments) done.environments = repo.environments
     }
   }
-  if (repo.environments) done.environments = repo.environments
 
   if (current && repo.rulesets && changed(repo.rulesets, prev.rulesets)) {
     await reconcileRulesets(org, repo.name, repo.rulesets, dry)
