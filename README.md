@@ -72,7 +72,29 @@ Respects GitHub API rate limits automatically.
 }
 ```
 
-Fields that accept a string will resolve against `presets`.
+Any repo field that accepts an object or array can be a string instead, referencing a key in `presets`. Supported fields: `merging`, `teams`, `topics`, `branchProtection`, `environments`, `rulesets`, `npm`. This lets you define a config once and reuse it across repos.
+
+```json
+{
+  "org": "my-org",
+  "presets": {
+    "default-rules": [
+      {
+        "name": "main",
+        "preventDeletion": true,
+        "preventForcePush": true,
+        "requirePR": { "approvals": 1 },
+        "bypassActors": [{ "type": "OrganizationAdmin" }]
+      }
+    ]
+  },
+  "repos": [
+    { "name": "api", "private": true, "rulesets": "default-rules" },
+    { "name": "web", "private": true, "rulesets": "default-rules" },
+    { "name": "docs", "private": false, "rulesets": "default-rules" }
+  ]
+}
+```
 
 ### Lock down a set of public modules
 
