@@ -27,8 +27,11 @@ const importCmd = command(
   summary('Import existing org config to JSON'),
   arg('<org>', 'GitHub org to import'),
   flag('--output|-o [path]', 'Output file path (default: stdout)'),
+  flag('--only [sections]', 'Comma-separated sections to import (members,teams,repos)'),
   async function () {
-    const config = await importOrg(importCmd.args.org)
+    const opts = {}
+    if (importCmd.flags.only) opts.only = importCmd.flags.only.split(',')
+    const config = await importOrg(importCmd.args.org, opts)
     const json = JSON.stringify(config, null, 2) + '\n'
     if (importCmd.flags.output) {
       require('fs').writeFileSync(path.resolve(importCmd.flags.output), json)

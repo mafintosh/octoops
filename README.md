@@ -21,6 +21,14 @@ Import an existing org into a config file:
 ```bash
 octoops import my-org > config.json
 octoops import my-org -o config.json
+octoops import my-org --only members
+octoops import my-org --only members,teams
+```
+
+Seed state from an existing config (skips GitHub API calls):
+
+```bash
+octoops seed config.json
 ```
 
 Respects GitHub API rate limits automatically.
@@ -101,7 +109,21 @@ Fields that accept a string will resolve against `presets`.
 }
 ```
 
-### Manage org teams and members
+### Manage org members
+
+```json
+{
+  "org": "my-org",
+  "admins": ["alice", "bob"],
+  "members": ["charlie", "dave", "eve"]
+}
+```
+
+`admins` and `members` are independent. If `admins` is present, only listed users will be admins. If `members` is present, only listed users will be members. Omit either to leave that role unmanaged.
+
+Removing someone from the org also removes them from all teams. If that person is still listed in a team config, the next apply will re-add them. Make sure `admins`/`members` is the superset of everyone referenced in `teams`.
+
+### Manage org teams
 
 ```json
 {
@@ -178,7 +200,7 @@ Only direct collaborators are managed. Org-level implicit access is ignored. Unl
 ## Programmatic usage
 
 ```js
-const { apply, importOrg } = require('octoops')
+const { apply, importOrg, seed } = require('octoops')
 
 await apply(config, {
   dry: false,
@@ -187,6 +209,9 @@ await apply(config, {
 })
 
 const config = await importOrg('my-org')
+const membersOnly = await importOrg('my-org', { only: ['members'] })
+
+seed(config, { statePath: './config.state.json' })
 ```
 
 A state file is written next to the config to track what was last applied. On partial failure, completed steps are saved so the next run picks up where it left off.

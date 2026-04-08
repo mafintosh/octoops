@@ -21,26 +21,42 @@ const PERMISSIONS_REVERSE = {
   admin: 'admin'
 }
 
-async function importOrg(org) {
-  console.log('fetching org teams...')
-  const orgTeams = await importOrgTeams(org)
+async function importOrg(org, opts = {}) {
+  const only = opts.only ? new Set(opts.only) : null
+  const config = { org }
 
-  console.log('fetching repos...')
-  const repoNames = JSON.parse(await gh(['api', `orgs/${org}/repos`, '--paginate']))
-    .map((r) => r.name)
-    .sort()
-
-  const repos = []
-  for (let i = 0; i < repoNames.length; i++) {
-    const name = repoNames[i]
-    console.log(`importing ${name} (${i + 1}/${repoNames.length})...`)
-    await checkRateLimit()
-    repos.push(await importRepo(org, name))
+  if (!only || only.has('members')) {
+    console.log('fetching org members...')
+    const admins = JSON.parse(await gh(['api', `orgs/${org}/members?role=admin`, '--paginate']))
+      .map((m) => m.login)
+      .sort()
+    const members = JSON.parse(await gh(['api', `orgs/${org}/members?role=member`, '--paginate']))
+      .map((m) => m.login)
+      .sort()
+    if (admins.length) config.admins = admins
+    if (members.length) config.members = members
   }
 
-  const config = { org }
-  if (orgTeams.length) config.teams = orgTeams
-  config.repos = repos
+  if (!only || only.has('teams')) {
+    console.log('fetching org teams...')
+    const orgTeams = await importOrgTeams(org)
+    if (orgTeams.length) config.teams = orgTeams
+  }
+
+  if (!only || only.has('repos')) {
+    console.log('fetching repos...')
+    const repoNames = JSON.parse(await gh(['api', `orgs/${org}/repos`, '--paginate']))
+      .map((r) => r.name)
+      .sort()
+
+    config.repos = []
+    for (let i = 0; i < repoNames.length; i++) {
+      const name = repoNames[i]
+      console.log(`importing ${name} (${i + 1}/${repoNames.length})...`)
+      await checkRateLimit()
+      config.repos.push(await importRepo(org, name))
+    }
+  }
 
   return config
 }
@@ -215,6 +231,9 @@ function seed(config, opts = {}) {
   const state = loadState(opts.statePath)
   const presets = config.presets || {}
 
+  if (config.admins) state.admins = config.admins
+  if (config.members) state.members = config.members
+
   if (config.teams) {
     const teamState = {}
     for (const team of config.teams) teamState[slugify(team.name)] = team
@@ -258,7 +277,32 @@ async function apply(config, opts = {}) {
 
   const presets = config.presets || {}
 
+  if ((config.admins || config.members) && config.teams) {
+    const orgMembers = new Set([...(config.admins || []), ...(config.members || [])])
+    for (const team of config.teams) {
+      for (const m of team.members || []) {
+        if (!orgMembers.has(m.username)) {
+          console.error(`warning: ${m.username} is in team "${team.name}" but not in admins/members`)
+        }
+      }
+    }
+  }
+
   try {
+    const adminsChanged = (config.admins || state.admins) && changed(config.admins, state.admins)
+    const membersChanged = (config.members || state.members) && changed(config.members, state.members)
+
+    if (adminsChanged || membersChanged) {
+      const allDesired = new Set([...(config.admins || []), ...(config.members || [])])
+      await reconcileOrgMembers(config.org, config.admins || [], state.admins, 'admin', allDesired, dry)
+      await reconcileOrgMembers(config.org, config.members || [], state.members, 'member', allDesired, dry)
+      if (!dry) {
+        state.admins = config.admins
+        state.members = config.members
+        if (opts.statePath) saveState(opts.statePath, state)
+      }
+    }
+
     if (config.teams) {
       if (Array.isArray(state.teams)) {
         const migrated = {}
@@ -284,7 +328,7 @@ async function apply(config, opts = {}) {
       }
     }
 
-    for (const raw of config.repos) {
+    for (const raw of config.repos || []) {
       const repo = resolve(raw, presets)
       const key = config.org + '/' + repo.name
       const prev = state[key] || {}
@@ -534,6 +578,33 @@ async function getCollaborators(org, name) {
     )
   } catch {
     return []
+  }
+}
+
+async function reconcileOrgMembers(org, desired, prev, role, allDesired, dry) {
+  const prevSet = new Set(prev || [])
+  const desiredSet = new Set(desired)
+
+  for (const username of desiredSet) {
+    if (prevSet.has(username)) continue
+    print(dry, 'org-' + role, org, username)
+    if (!dry)
+      await gh([
+        'api',
+        `orgs/${org}/memberships/${username}`,
+        '--method',
+        'PUT',
+        '-f',
+        `role=${role}`
+      ])
+  }
+
+  for (const username of prevSet) {
+    if (desiredSet.has(username)) continue
+    if (allDesired.has(username)) continue // moving between admin/member, not removing
+    print(dry, 'remove-org-member', org, username)
+    if (!dry)
+      await gh(['api', `orgs/${org}/memberships/${username}`, '--method', 'DELETE'])
   }
 }
 
