@@ -219,6 +219,29 @@ Only direct collaborators are managed. Org-level implicit access is ignored. Unl
 }
 ```
 
+### npm trusted publishing
+
+```json
+{
+  "org": "my-org",
+  "repos": [
+    {
+      "name": "my-module",
+      "private": false,
+      "npm": {
+        "package": "my-module",
+        "trustedPublishing": {
+          "workflow": "publish.yml",
+          "environment": "npm"
+        }
+      }
+    }
+  ]
+}
+```
+
+Sets up npm trusted publishing so GitHub Actions can publish via OIDC without npm tokens. If the package doesn't exist on npm yet, a placeholder 0.0.0 is published first. `package` defaults to the repo name if omitted. Requires interactive npm authentication on first run.
+
 ## Programmatic usage
 
 ```js
