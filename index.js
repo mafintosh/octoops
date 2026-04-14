@@ -477,8 +477,18 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     for (const rule of repo.branchProtection || []) {
       if (current) await reconcileBranchProtection(org, repo.name, rule, dry)
     }
+    const prevBranches = new Set((prev.branchProtection || []).map((r) => r.branch || 'main'))
+    const desiredBranches = new Set((repo.branchProtection || []).map((r) => r.branch || 'main'))
+    for (const branch of prevBranches) {
+      if (desiredBranches.has(branch)) continue
+      if (current) {
+        print(dry, 'remove-branch-protection', `${org}/${repo.name}`, branch)
+        if (!dry)
+          await gh(['api', `repos/${org}/${repo.name}/branches/${branch}/protection`, '--method', 'DELETE'])
+      }
+    }
   }
-  if (repo.branchProtection) done.branchProtection = repo.branchProtection
+  done.branchProtection = repo.branchProtection
 
   if (changed(repo.environments, prev.environments)) {
     const hasReviewers = (repo.environments || []).some((e) => e.reviewers && e.reviewers.length)
@@ -494,13 +504,14 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     }
   }
 
-  if (current && repo.rulesets && changed(repo.rulesets, prev.rulesets)) {
-    await reconcileRulesets(org, repo.name, repo.rulesets, dry)
+  if (current && (repo.rulesets || prev.rulesets) && changed(repo.rulesets, prev.rulesets)) {
+    await reconcileRulesets(org, repo.name, repo.rulesets || [], prev.rulesets, dry)
   }
-  if (repo.rulesets) done.rulesets = repo.rulesets
+  done.rulesets = repo.rulesets
 
   if (repo.npm && changed(repo.npm, prev.npm)) {
-    await reconcileNpm(org, repo.name, repo.npm, dry)
+    const npms = Array.isArray(repo.npm) ? repo.npm : [repo.npm]
+    for (const npm of npms) await reconcileNpm(org, repo.name, npm, dry)
   }
   if (repo.npm) done.npm = repo.npm
 }
@@ -792,13 +803,29 @@ async function reconcileEnvironment(org, repoName, env, dry) {
   )
 }
 
-async function reconcileRulesets(org, repoName, desired, dry) {
-  const current = await getRulesets(org, repoName)
-  const currentByName = new Map(current.map((r) => [r.name, r]))
+async function reconcileRulesets(org, repoName, desired, prev, dry) {
+  const desiredNames = new Set(desired.map((r) => r.name))
+  const prevNames = (prev || []).filter((r) => !desiredNames.has(r.name))
+
+  if (prevNames.length) {
+    const current = await getRulesets(org, repoName)
+    const currentByName = new Map(current.map((r) => [r.name, r]))
+    for (const removed of prevNames) {
+      const existing = currentByName.get(removed.name)
+      if (!existing) continue
+      print(dry, 'remove-ruleset', `${org}/${repoName}`, removed.name)
+      if (!dry)
+        await gh(['api', `repos/${org}/${repoName}/rulesets/${existing.id}`, '--method', 'DELETE'])
+    }
+  }
 
   for (const ruleset of desired) {
     const body = await buildRulesetBody(org, ruleset)
-    const existing = currentByName.get(ruleset.name)
+    const prevRuleset = (prev || []).find((r) => r.name === ruleset.name)
+    if (prevRuleset && !changed(ruleset, prevRuleset)) continue
+
+    const current = await getRulesets(org, repoName)
+    const existing = current.find((r) => r.name === ruleset.name)
 
     if (existing) {
       const full = JSON.parse(await gh(['api', `repos/${org}/${repoName}/rulesets/${existing.id}`]))
