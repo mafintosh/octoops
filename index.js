@@ -247,6 +247,7 @@ function seed(config, opts = {}) {
     if (repo.archived) entry.archived = true
     if (repo.description !== undefined) entry.description = repo.description
     if (repo.private !== undefined) entry.private = repo.private
+    if (repo.defaultBranch) entry.defaultBranch = repo.defaultBranch
     if (repo.merging) entry.merging = repo.merging
     if (repo.topics) entry.topics = repo.topics
     if (repo.teams) entry.teams = repo.teams
@@ -401,8 +402,8 @@ function changed(a, b) {
 function repoChanged(repo, prev) {
   if (repo.archived && !prev.archived) return true
   if (repo.archived) return false
-  const settings = { description: repo.description, private: repo.private, merging: repo.merging }
-  const prevSettings = { description: prev.description, private: prev.private, merging: prev.merging }
+  const settings = { description: repo.description, private: repo.private, defaultBranch: repo.defaultBranch, merging: repo.merging }
+  const prevSettings = { description: prev.description, private: prev.private, defaultBranch: prev.defaultBranch, merging: prev.merging }
   if (changed(settings, prevSettings)) return true
   if ((repo.topics || prev.topics) && changed(repo.topics, prev.topics)) return true
   if ((repo.teams || prev.teams) && changed(repo.teams, prev.teams)) return true
@@ -444,10 +445,11 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     current = true
   }
 
-  const settings = { description: repo.description, private: repo.private, merging: repo.merging }
+  const settings = { description: repo.description, private: repo.private, defaultBranch: repo.defaultBranch, merging: repo.merging }
   const prevSettings = {
     description: prev.description,
     private: prev.private,
+    defaultBranch: prev.defaultBranch,
     merging: prev.merging
   }
 
@@ -456,6 +458,7 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   }
   if (repo.description !== undefined) done.description = repo.description
   if (repo.private !== undefined) done.private = repo.private
+  if (repo.defaultBranch) done.defaultBranch = repo.defaultBranch
   if (repo.merging) done.merging = repo.merging
 
   if (repo.topics && current && changed(repo.topics, prev.topics)) {
@@ -521,6 +524,7 @@ async function reconcileSettings(org, repo, dry) {
 
   if (repo.description !== undefined) patch.description = repo.description
   if (repo.private !== undefined) patch.private = repo.private
+  if (repo.defaultBranch) patch.default_branch = repo.defaultBranch
   if (repo.merging) {
     const m = repo.merging
     if (m.squashOnly !== undefined) {
