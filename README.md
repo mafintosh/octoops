@@ -178,7 +178,7 @@ Removing someone from the org also removes them from all teams. If that person i
 }
 ```
 
-Org teams are reconciled before repos. Parent teams should come before children in the array. Members not in the list are removed.
+Org teams are reconciled before repos. Parent teams should come before children in the array. Members not in the list are removed. Teams in state but not in config are deleted. Renaming a team will create the new team and delete the old one.
 
 ### Add individual collaborators to a repo
 

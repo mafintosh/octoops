@@ -11,7 +11,7 @@ const PERMISSIONS = {
   admin: 'admin'
 }
 
-module.exports = { apply, importOrg, seed }
+module.exports = { apply, importOrg, seed, filter }
 
 const PERMISSIONS_REVERSE = {
   pull: 'read',
@@ -44,10 +44,15 @@ async function importOrg(org, opts = {}) {
   }
 
   if (!only || only.has('repos')) {
-    console.log('fetching repos...')
-    const repoNames = JSON.parse(await gh(['api', `orgs/${org}/repos`, '--paginate']))
-      .map((r) => r.name)
-      .sort()
+    let repoNames
+    if (opts.repos) {
+      repoNames = opts.repos.slice().sort()
+    } else {
+      console.log('fetching repos...')
+      repoNames = JSON.parse(await gh(['api', `orgs/${org}/repos`, '--paginate']))
+        .map((r) => r.name)
+        .sort()
+    }
 
     config.repos = []
     for (let i = 0; i < repoNames.length; i++) {
@@ -97,7 +102,8 @@ async function importRepo(org, name) {
   const entry = { name }
 
   if (repo.description) entry.description = repo.description
-  entry.private = repo.private
+  if (repo.visibility === 'internal') entry.internal = true
+  else entry.private = repo.private
 
   const merging = {}
   if (!repo.allow_merge_commit && !repo.allow_rebase_merge && repo.allow_squash_merge) {
@@ -227,6 +233,54 @@ async function checkRateLimit() {
 
 let auditStream = null
 
+function filter(config, opts = {}) {
+  const out = { ...config }
+  const presets = out.presets || {}
+
+  if (opts.repos) {
+    const keep = new Set(opts.repos)
+    out.repos = (out.repos || []).filter((r) => keep.has(r.name))
+  }
+
+  if (opts.pruneTeams && out.teams) {
+    const referenced = new Set()
+    for (const raw of out.repos || []) {
+      const repo = resolve(raw, presets)
+      if (!Array.isArray(repo.teams)) continue
+      for (const t of repo.teams) referenced.add(t.name)
+    }
+    const byName = new Map(out.teams.map((t) => [t.name, t]))
+    const keep = new Set()
+    const walk = (name) => {
+      if (keep.has(name)) return
+      const team = byName.get(name)
+      if (!team) return
+      keep.add(name)
+      if (team.parent) walk(team.parent)
+    }
+    for (const name of referenced) walk(name)
+    out.teams = out.teams.filter((t) => keep.has(t.name))
+    if (!out.teams.length) delete out.teams
+  }
+
+  if (opts.pruneMembers) {
+    const referenced = new Set()
+    for (const team of out.teams || []) {
+      for (const m of team.members || []) referenced.add(m.username)
+    }
+    if (out.admins) {
+      out.admins = out.admins.filter((u) => referenced.has(u))
+      if (!out.admins.length) delete out.admins
+    }
+    if (out.members) {
+      out.members = out.members.filter((u) => referenced.has(u))
+      if (!out.members.length) delete out.members
+    }
+  }
+
+  return out
+}
+
 function seed(config, opts = {}) {
   const state = loadState(opts.statePath)
   const presets = config.presets || {}
@@ -240,13 +294,14 @@ function seed(config, opts = {}) {
     state.teams = teamState
   }
 
-  for (const raw of config.repos) {
+  for (const raw of config.repos || []) {
     const repo = resolve(raw, presets)
     const key = config.org + '/' + repo.name
     const entry = {}
     if (repo.archived) entry.archived = true
     if (repo.description !== undefined) entry.description = repo.description
     if (repo.private !== undefined) entry.private = repo.private
+    if (repo.internal !== undefined) entry.internal = repo.internal
     if (repo.defaultBranch) entry.defaultBranch = repo.defaultBranch
     if (repo.merging) entry.merging = repo.merging
     if (repo.topics) entry.topics = repo.topics
@@ -260,7 +315,7 @@ function seed(config, opts = {}) {
   }
 
   if (opts.statePath) saveState(opts.statePath, state)
-  console.log('seeded state for ' + (config.teams ? config.teams.length + ' teams and ' : '') + config.repos.length + ' repos')
+  console.log('seeded state for ' + (config.teams ? config.teams.length + ' teams and ' : '') + (config.repos || []).length + ' repos')
 }
 
 async function apply(config, opts = {}) {
@@ -305,7 +360,7 @@ async function apply(config, opts = {}) {
       }
     }
 
-    if (config.teams) {
+    if (config.teams || state.teams) {
       if (Array.isArray(state.teams)) {
         const migrated = {}
         for (const t of state.teams) migrated[slugify(t.name)] = t
@@ -313,8 +368,10 @@ async function apply(config, opts = {}) {
         if (opts.statePath) saveState(opts.statePath, state)
       }
       const teamState = state.teams || {}
+      const desiredSlugs = new Set((config.teams || []).map((t) => slugify(t.name)))
       let teamsChanged = false
-      for (const team of config.teams) {
+
+      for (const team of config.teams || []) {
         const key = slugify(team.name)
         if (changed(team, teamState[key])) {
           await reconcileOrgTeam(config.org, team, teamState[key], dry)
@@ -324,6 +381,17 @@ async function apply(config, opts = {}) {
           }
         }
       }
+
+      for (const slug of Object.keys(teamState)) {
+        if (desiredSlugs.has(slug)) continue
+        print(dry, 'remove-team', config.org, slug)
+        if (!dry) {
+          await gh(['api', `orgs/${config.org}/teams/${slug}`, '--method', 'DELETE'])
+          delete teamState[slug]
+          teamsChanged = true
+        }
+      }
+
       if (teamsChanged) {
         state.teams = teamState
         if (opts.statePath) saveState(opts.statePath, state)
@@ -402,8 +470,8 @@ function changed(a, b) {
 function repoChanged(repo, prev) {
   if (repo.archived && !prev.archived) return true
   if (repo.archived) return false
-  const settings = { description: repo.description, private: repo.private, defaultBranch: repo.defaultBranch, merging: repo.merging }
-  const prevSettings = { description: prev.description, private: prev.private, defaultBranch: prev.defaultBranch, merging: prev.merging }
+  const settings = { description: repo.description, private: repo.private, internal: repo.internal, defaultBranch: repo.defaultBranch, merging: repo.merging }
+  const prevSettings = { description: prev.description, private: prev.private, internal: prev.internal, defaultBranch: prev.defaultBranch, merging: prev.merging }
   if (changed(settings, prevSettings)) return true
   if ((repo.topics || prev.topics) && changed(repo.topics, prev.topics)) return true
   if ((repo.teams || prev.teams) && changed(repo.teams, prev.teams)) return true
@@ -441,14 +509,16 @@ async function reconcile(org, repo, prev, dry, done, opts) {
       // createRepo already sets description and visibility
       if (repo.description !== undefined) prev.description = repo.description
       if (repo.private !== undefined) prev.private = repo.private
+      if (repo.internal !== undefined) prev.internal = repo.internal
     }
     current = true
   }
 
-  const settings = { description: repo.description, private: repo.private, defaultBranch: repo.defaultBranch, merging: repo.merging }
+  const settings = { description: repo.description, private: repo.private, internal: repo.internal, defaultBranch: repo.defaultBranch, merging: repo.merging }
   const prevSettings = {
     description: prev.description,
     private: prev.private,
+    internal: prev.internal,
     defaultBranch: prev.defaultBranch,
     merging: prev.merging
   }
@@ -458,6 +528,7 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   }
   if (repo.description !== undefined) done.description = repo.description
   if (repo.private !== undefined) done.private = repo.private
+  if (repo.internal !== undefined) done.internal = repo.internal
   if (repo.defaultBranch) done.defaultBranch = repo.defaultBranch
   if (repo.merging) done.merging = repo.merging
 
@@ -523,7 +594,8 @@ async function reconcileSettings(org, repo, dry) {
   const patch = {}
 
   if (repo.description !== undefined) patch.description = repo.description
-  if (repo.private !== undefined) patch.private = repo.private
+  if (repo.internal === true) patch.visibility = 'internal'
+  else if (repo.private !== undefined) patch.private = repo.private
   if (repo.defaultBranch) patch.default_branch = repo.defaultBranch
   if (repo.merging) {
     const m = repo.merging
@@ -778,7 +850,7 @@ async function reconcileEnvironment(org, repoName, env, dry) {
   if (current) {
     const currentSlugs = (current.protection_rules || [])
       .flatMap((r) => r.reviewers || [])
-      .filter((r) => r.type === 'Team')
+      .filter((r) => r.type === 'Team' && r.reviewer)
       .map((r) => r.reviewer.slug)
       .sort()
 
@@ -1091,7 +1163,7 @@ async function createRepo(org, repo) {
     'repo',
     'create',
     `${org}/${repo.name}`,
-    repo.private === false ? '--public' : '--private'
+    repo.internal === true ? '--internal' : repo.private === false ? '--public' : '--private'
   ]
   if (repo.description) args.push('--description', repo.description)
   await gh(args)
