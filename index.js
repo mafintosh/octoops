@@ -557,8 +557,13 @@ async function reconcile(org, repo, prev, dry, done, opts) {
       if (desiredBranches.has(branch)) continue
       if (current) {
         print(dry, 'remove-branch-protection', `${org}/${repo.name}`, branch)
-        if (!dry)
-          await gh(['api', `repos/${org}/${repo.name}/branches/${branch}/protection`, '--method', 'DELETE'])
+        if (!dry) {
+          try {
+            await gh(['api', `repos/${org}/${repo.name}/branches/${branch}/protection`, '--method', 'DELETE'])
+          } catch (err) {
+            if (!/Branch not protected|Not Found/.test(err.message)) throw err
+          }
+        }
       }
     }
   }
