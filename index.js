@@ -320,6 +320,7 @@ function seed(config, opts = {}) {
 
 async function apply(config, opts = {}) {
   const dry = opts.dry === true
+  if (config.enterprise) opts = { ...opts, enterprise: true }
   const state = loadState(opts.statePath)
 
   if (opts.audit) {
@@ -386,7 +387,11 @@ async function apply(config, opts = {}) {
         if (desiredSlugs.has(slug)) continue
         print(dry, 'remove-team', config.org, slug)
         if (!dry) {
-          await gh(['api', `orgs/${config.org}/teams/${slug}`, '--method', 'DELETE'])
+          try {
+            await gh(['api', `orgs/${config.org}/teams/${slug}`, '--method', 'DELETE'])
+          } catch (err) {
+            if (!/Not Found/.test(err.message)) throw err
+          }
           delete teamState[slug]
           teamsChanged = true
         }
@@ -722,8 +727,13 @@ async function reconcileOrgMembers(org, desired, prev, role, allDesired, dry) {
     if (desiredSet.has(username)) continue
     if (allDesired.has(username)) continue // moving between admin/member, not removing
     print(dry, 'remove-org-member', org, username)
-    if (!dry)
-      await gh(['api', `orgs/${org}/memberships/${username}`, '--method', 'DELETE'])
+    if (!dry) {
+      try {
+        await gh(['api', `orgs/${org}/memberships/${username}`, '--method', 'DELETE'])
+      } catch (err) {
+        if (!/Not Found|Cannot find/.test(err.message)) throw err
+      }
+    }
   }
 }
 
