@@ -112,6 +112,9 @@ async function importRepo(org, name) {
   if (repo.delete_branch_on_merge) merging.deleteBranchOnMerge = true
   if (Object.keys(merging).length) entry.merging = merging
 
+  if (repo.has_wiki === false) entry.wiki = false
+  if (repo.has_projects === false) entry.projects = false
+
   const { names: topics } = JSON.parse(await gh(['api', `repos/${org}/${name}/topics`]))
   if (topics.length) entry.topics = topics
 
@@ -304,6 +307,8 @@ function seed(config, opts = {}) {
     if (repo.internal !== undefined) entry.internal = repo.internal
     if (repo.defaultBranch) entry.defaultBranch = repo.defaultBranch
     if (repo.merging) entry.merging = repo.merging
+    if (repo.wiki !== undefined) entry.wiki = repo.wiki
+    if (repo.projects !== undefined) entry.projects = repo.projects
     if (repo.topics) entry.topics = repo.topics
     if (repo.teams) entry.teams = repo.teams
     if (repo.collaborators) entry.collaborators = repo.collaborators
@@ -475,8 +480,8 @@ function changed(a, b) {
 function repoChanged(repo, prev) {
   if (repo.archived && !prev.archived) return true
   if (repo.archived) return false
-  const settings = { description: repo.description, private: repo.private, internal: repo.internal, defaultBranch: repo.defaultBranch, merging: repo.merging }
-  const prevSettings = { description: prev.description, private: prev.private, internal: prev.internal, defaultBranch: prev.defaultBranch, merging: prev.merging }
+  const settings = { description: repo.description, private: repo.private, internal: repo.internal, defaultBranch: repo.defaultBranch, merging: repo.merging, wiki: repo.wiki, projects: repo.projects }
+  const prevSettings = { description: prev.description, private: prev.private, internal: prev.internal, defaultBranch: prev.defaultBranch, merging: prev.merging, wiki: prev.wiki, projects: prev.projects }
   if (changed(settings, prevSettings)) return true
   if ((repo.topics || prev.topics) && changed(repo.topics, prev.topics)) return true
   if ((repo.teams || prev.teams) && changed(repo.teams, prev.teams)) return true
@@ -525,7 +530,9 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     private: prev.private,
     internal: prev.internal,
     defaultBranch: prev.defaultBranch,
-    merging: prev.merging
+    merging: prev.merging,
+    wiki: prev.wiki,
+    projects: prev.projects
   }
 
   if (current && changed(settings, prevSettings)) {
@@ -536,6 +543,8 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   if (repo.internal !== undefined) done.internal = repo.internal
   if (repo.defaultBranch) done.defaultBranch = repo.defaultBranch
   if (repo.merging) done.merging = repo.merging
+  if (repo.wiki !== undefined) done.wiki = repo.wiki
+  if (repo.projects !== undefined) done.projects = repo.projects
 
   if (repo.topics && current && changed(repo.topics, prev.topics)) {
     await reconcileTopics(org, repo.name, repo.topics, dry)
@@ -607,6 +616,8 @@ async function reconcileSettings(org, repo, dry) {
   if (repo.internal === true) patch.visibility = 'internal'
   else if (repo.private !== undefined) patch.private = repo.private
   if (repo.defaultBranch) patch.default_branch = repo.defaultBranch
+  if (repo.wiki !== undefined) patch.has_wiki = repo.wiki
+  if (repo.projects !== undefined) patch.has_projects = repo.projects
   if (repo.merging) {
     const m = repo.merging
     if (m.squashOnly !== undefined) {

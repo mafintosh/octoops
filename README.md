@@ -74,6 +74,21 @@ Respects GitHub API rate limits automatically.
 
 Any repo field that accepts an object or array can be a string instead, referencing a key in `presets`. Supported fields: `merging`, `teams`, `topics`, `branchProtection`, `environments`, `rulesets`, `npm`. This lets you define a config once and reuse it across repos.
 
+### Repo settings
+
+Top-level repo fields for basic settings:
+
+- `description` — repo description
+- `private: true|false` — visibility
+- `internal: true` — internal visibility (Enterprise only, overrides `private`)
+- `defaultBranch` — default branch name (e.g. `"main"`)
+- `wiki: true|false` — enable/disable repo wiki
+- `projects: true|false` — enable/disable repo projects
+- `archived: true` — archive the repo (skips further reconcile)
+- `merging` — `{ squashOnly, deleteBranchOnMerge }`
+
+Omitting a field leaves the current GitHub value untouched. Setting it makes octoops reconcile it.
+
 ```json
 {
   "org": "my-org",
