@@ -109,6 +109,9 @@ async function importRepo(org, name) {
   if (!repo.allow_merge_commit && !repo.allow_rebase_merge && repo.allow_squash_merge) {
     merging.squashOnly = true
   }
+  if (!repo.allow_update_branch) {
+    merging.allowUpdateBranch = true
+  }
   if (repo.delete_branch_on_merge) merging.deleteBranchOnMerge = true
   if (Object.keys(merging).length) entry.merging = merging
 
@@ -611,6 +614,9 @@ async function reconcileSettings(org, repo, dry) {
     }
     if (m.deleteBranchOnMerge !== undefined) {
       patch.delete_branch_on_merge = m.deleteBranchOnMerge
+    }
+    if (m.allowUpdateBranch !== undefined) {
+      patch.allow_update_branch = m.allowUpdateBranch
     }
   }
 
