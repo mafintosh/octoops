@@ -508,8 +508,14 @@ function changed(a, b) {
 function repoChanged(repo, prev) {
   if (repo.archived && !prev.archived) return true
   if (repo.archived) return false
-  const settings = { description: repo.description, private: repo.private, internal: repo.internal, defaultBranch: repo.defaultBranch, merging: repo.merging, wiki: repo.wiki, projects: repo.projects }
-  const prevSettings = { description: prev.description, private: prev.private, internal: prev.internal, defaultBranch: prev.defaultBranch, merging: prev.merging, wiki: prev.wiki, projects: prev.projects }
+  if (prev.archived && !repo.archived) return true
+  const settings = {}
+  const prevSettings = {}
+  for (const k of ['description', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects']) {
+    if (repo[k] === undefined) continue
+    settings[k] = repo[k]
+    prevSettings[k] = prev[k]
+  }
   if (changed(settings, prevSettings)) return true
   if ((repo.topics || prev.topics) && changed(repo.topics, prev.topics)) return true
   if ((repo.teams || prev.teams) && changed(repo.teams, prev.teams)) return true
@@ -562,15 +568,12 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     current = true
   }
 
-  const settings = { description: repo.description, private: repo.private, internal: repo.internal, defaultBranch: repo.defaultBranch, merging: repo.merging, wiki: repo.wiki, projects: repo.projects }
-  const prevSettings = {
-    description: prev.description,
-    private: prev.private,
-    internal: prev.internal,
-    defaultBranch: prev.defaultBranch,
-    merging: prev.merging,
-    wiki: prev.wiki,
-    projects: prev.projects
+  const settings = {}
+  const prevSettings = {}
+  for (const k of ['description', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects']) {
+    if (repo[k] === undefined) continue
+    settings[k] = repo[k]
+    prevSettings[k] = prev[k]
   }
 
   if (current && changed(settings, prevSettings)) {
