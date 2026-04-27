@@ -187,6 +187,8 @@ async function importRepo(org, name) {
           if (ref.exclude && ref.exclude.length) r.exclude = ref.exclude
         }
         for (const rule of full.rules || []) {
+          if (rule.type === 'creation') r.preventCreation = true
+          if (rule.type === 'update') r.preventUpdate = true
           if (rule.type === 'deletion') r.preventDeletion = true
           if (rule.type === 'non_fast_forward') r.preventForcePush = true
           if (rule.type === 'required_linear_history') r.requireLinearHistory = true
@@ -1000,6 +1002,14 @@ async function reconcileRulesets(org, repoName, desired, prev, dry) {
 
 async function buildRulesetBody(org, ruleset) {
   const rules = []
+
+  if (ruleset.preventCreation) {
+    rules.push({ type: 'creation' })
+  }
+
+  if (ruleset.preventUpdate) {
+    rules.push({ type: 'update' })
+  }
 
   if (ruleset.preventDeletion) {
     rules.push({ type: 'deletion' })

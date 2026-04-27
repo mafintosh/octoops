@@ -104,6 +104,8 @@ Each entry in `rulesets` supports:
 - `target` — `"branch"` (default) or `"tag"`
 - `enforcement` — `"active"` (default), `"evaluate"`, or `"disabled"`
 - `include` / `exclude` — branch/tag patterns. Defaults to `["~DEFAULT_BRANCH"]`. Use `"~ALL"` to match everything
+- `preventCreation: true` — block creating matching branches/tags
+- `preventUpdate: true` — block updating matching branches/tags
 - `preventDeletion: true` — block branch/tag deletion
 - `preventForcePush: true` — block force pushes
 - `requireLinearHistory: true` — require linear commit history (no merge commits)
