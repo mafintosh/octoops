@@ -325,7 +325,28 @@ function seed(config, opts = {}) {
 }
 
 async function resync(config, opts = {}) {
-  const fresh = await importOrg(config.org, {})
+  const importOpts = {}
+  const only = []
+  if (config.admins || config.members) only.push('members')
+  if (config.teams) only.push('teams')
+  if (config.repos && config.repos.length) {
+    only.push('repos')
+    importOpts.repos = config.repos.map((r) => r.name)
+  }
+  if (only.length) importOpts.only = only
+
+  const fresh = await importOrg(config.org, importOpts)
+
+  if (config.admins && fresh.admins) fresh.admins = fresh.admins.filter((u) => config.admins.includes(u))
+  else if (!config.admins) delete fresh.admins
+  if (config.members && fresh.members) fresh.members = fresh.members.filter((u) => config.members.includes(u))
+  else if (!config.members) delete fresh.members
+
+  if (config.teams && fresh.teams) {
+    const keep = new Set(config.teams.map((t) => t.name))
+    fresh.teams = fresh.teams.filter((t) => keep.has(t.name))
+  }
+
   if (opts.statePath) saveState(opts.statePath, {})
   seed(fresh, opts)
 }
