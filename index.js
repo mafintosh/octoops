@@ -506,6 +506,16 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     return
   }
 
+  if (!repo.archived && prev.archived) {
+    print(dry, 'unarchive', `${org}/${repo.name}`)
+    if (!dry)
+      await gh(['api', `repos/${org}/${repo.name}`, '--method', 'PATCH', '--input', '-'], {
+        body: { archived: false }
+      })
+    done.archived = false
+    delete prev.archived
+  }
+
   let current = Object.keys(prev).length > 0
 
   if (!current) {
@@ -524,7 +534,7 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     current = true
   }
 
-  const settings = { description: repo.description, private: repo.private, internal: repo.internal, defaultBranch: repo.defaultBranch, merging: repo.merging }
+  const settings = { description: repo.description, private: repo.private, internal: repo.internal, defaultBranch: repo.defaultBranch, merging: repo.merging, wiki: repo.wiki, projects: repo.projects }
   const prevSettings = {
     description: prev.description,
     private: prev.private,
