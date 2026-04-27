@@ -84,7 +84,8 @@ Top-level repo fields for basic settings:
 - `defaultBranch` — default branch name (e.g. `"main"`)
 - `wiki: true|false` — enable/disable repo wiki
 - `projects: true|false` — enable/disable repo projects
-- `archived: true` — archive the repo (skips further reconcile)
+- `archived: true` — archive the repo (skips further reconcile). Removing this from the config (when state has it) unarchives the repo
+- `init: true` — initialize the repo with a README on creation (so the default branch exists). Only used at create time, ignored on existing repos
 - `merging` — `{ squashOnly, deleteBranchOnMerge }`
 
 Omitting a field leaves the current GitHub value untouched. Setting it makes octoops reconcile it.
