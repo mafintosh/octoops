@@ -96,6 +96,24 @@ Top-level repo fields for basic settings:
 
 Omitting a field leaves the current GitHub value untouched. Setting it makes octoops reconcile it.
 
+### Ruleset fields
+
+Each entry in `rulesets` supports:
+
+- `name` — required
+- `target` — `"branch"` (default) or `"tag"`
+- `enforcement` — `"active"` (default), `"evaluate"`, or `"disabled"`
+- `include` / `exclude` — branch/tag patterns. Defaults to `["~DEFAULT_BRANCH"]`. Use `"~ALL"` to match everything
+- `preventDeletion: true` — block branch/tag deletion
+- `preventForcePush: true` — block force pushes
+- `requireLinearHistory: true` — require linear commit history (no merge commits)
+- `requireSignedCommits: true` — require signed commits
+- `requirePR: { approvals, dismissStale, codeOwners, lastPushApproval, resolveThreads }` — require pull requests
+- `requiredStatusChecks: { strict, checks: [...] }` — required CI checks; `checks` is strings or `{ context, integrationId }`
+- `filePathRestrictions: ["..."]` — glob restrictions on which file paths can change
+- `requiredWorkflows: [{ path, repositoryId, ref }]` — required GitHub Actions workflows
+- `bypassActors: [...]` — entries: `{ team }`, `{ username }`, or `{ type: "OrganizationAdmin" }`, each with optional `mode: "always"|"pull_request"`
+
 ```json
 {
   "org": "my-org",

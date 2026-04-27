@@ -189,6 +189,8 @@ async function importRepo(org, name) {
         for (const rule of full.rules || []) {
           if (rule.type === 'deletion') r.preventDeletion = true
           if (rule.type === 'non_fast_forward') r.preventForcePush = true
+          if (rule.type === 'required_linear_history') r.requireLinearHistory = true
+          if (rule.type === 'required_signatures') r.requireSignedCommits = true
           if (rule.type === 'pull_request' && rule.parameters) {
             r.requirePR = {}
             if (rule.parameters.required_approving_review_count) {
@@ -1005,6 +1007,14 @@ async function buildRulesetBody(org, ruleset) {
 
   if (ruleset.preventForcePush) {
     rules.push({ type: 'non_fast_forward' })
+  }
+
+  if (ruleset.requireLinearHistory) {
+    rules.push({ type: 'required_linear_history' })
+  }
+
+  if (ruleset.requireSignedCommits) {
+    rules.push({ type: 'required_signatures' })
   }
 
   if (ruleset.requirePR) {
