@@ -2,7 +2,7 @@
 
 const { command, summary, flag, arg } = require('paparam')
 const path = require('path')
-const { apply, importOrg, seed, filter } = require('.')
+const { apply, importOrg, seed, filter, resync } = require('.')
 
 const applyCmd = command(
   'apply',
@@ -63,6 +63,19 @@ const seedCmd = command(
   }
 )
 
+const resyncCmd = command(
+  'resync',
+  summary('Refetch live state from GitHub and overwrite the state file'),
+  arg('<config>', 'Path to config JSON file'),
+  async function () {
+    const configPath = path.resolve(resyncCmd.args.config)
+    const config = require(configPath)
+    const statePath = configPath.replace(/\.json$/, '.state.json')
+    await resync(config, { statePath })
+    console.log('resynced state to ' + statePath)
+  }
+)
+
 const listCmd = command(
   'list',
   summary('List repository names from a config file'),
@@ -111,6 +124,7 @@ const cmd = command(
   applyCmd,
   importCmd,
   seedCmd,
+  resyncCmd,
   listCmd,
   filterCmd
 )

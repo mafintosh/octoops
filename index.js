@@ -11,7 +11,7 @@ const PERMISSIONS = {
   admin: 'admin'
 }
 
-module.exports = { apply, importOrg, seed, filter }
+module.exports = { apply, importOrg, seed, filter, resync }
 
 const PERMISSIONS_REVERSE = {
   pull: 'read',
@@ -101,6 +101,7 @@ async function importRepo(org, name) {
   const repo = JSON.parse(await gh(['api', `repos/${org}/${name}`]))
   const entry = { name }
 
+  if (repo.archived) entry.archived = true
   if (repo.description) entry.description = repo.description
   if (repo.visibility === 'internal') entry.internal = true
   else entry.private = repo.private
@@ -321,6 +322,12 @@ function seed(config, opts = {}) {
 
   if (opts.statePath) saveState(opts.statePath, state)
   console.log('seeded state for ' + (config.teams ? config.teams.length + ' teams and ' : '') + (config.repos || []).length + ' repos')
+}
+
+async function resync(config, opts = {}) {
+  const fresh = await importOrg(config.org, {})
+  if (opts.statePath) saveState(opts.statePath, {})
+  seed(fresh, opts)
 }
 
 async function apply(config, opts = {}) {

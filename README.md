@@ -31,6 +31,12 @@ Seed state from an existing config (skips GitHub API calls):
 octoops seed config.json
 ```
 
+Resync state from live GitHub (use this if your state file got out of sync):
+
+```bash
+octoops resync config.json
+```
+
 Respects GitHub API rate limits automatically.
 
 ## Configuration
