@@ -141,7 +141,7 @@ Each entry in `rulesets` supports:
 - `preventForcePush: true` — block force pushes
 - `requireLinearHistory: true` — require linear commit history (no merge commits)
 - `requireSignedCommits: true` — require signed commits
-- `requirePR: { approvals, dismissStale, codeOwners, lastPushApproval, resolveThreads }` — require pull requests
+- `requirePR: { approvals, dismissStale, codeOwners, lastPushApproval, resolveThreads, requiredReviewers }` — require pull requests. `requiredReviewers` (beta) is `[{ team, filePatterns, minApprovals }]` — each entry forces the named team to review when the PR touches matching files
 - `requiredStatusChecks: { strict, checks: [...] }` — required CI checks; `checks` is strings or `{ context, integrationId }`
 - `filePathRestrictions: ["..."]` — glob restrictions on which file paths can change
 - `requiredWorkflows: [{ path, repositoryId, ref }]` — required GitHub Actions workflows

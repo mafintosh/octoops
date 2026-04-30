@@ -203,6 +203,14 @@ async function importRepo(org, name) {
             if (rule.parameters.require_code_owner_review) r.requirePR.codeOwners = true
             if (rule.parameters.require_last_push_approval) r.requirePR.lastPushApproval = true
             if (rule.parameters.required_review_thread_resolution) r.requirePR.resolveThreads = true
+            if (rule.parameters.required_reviewers && rule.parameters.required_reviewers.length) {
+              r.requirePR.requiredReviewers = rule.parameters.required_reviewers.map((rr) => {
+                const e = { filePatterns: rr.file_patterns }
+                if (rr.minimum_approvals !== undefined) e.minApprovals = rr.minimum_approvals
+                if (rr.reviewer && rr.reviewer.name) e.team = rr.reviewer.name
+                return e
+              })
+            }
           }
           if (rule.type === 'file_path_restriction' && rule.parameters) {
             r.filePathRestrictions = rule.parameters.restricted_file_paths
@@ -1053,16 +1061,26 @@ async function buildRulesetBody(org, ruleset) {
 
   if (ruleset.requirePR) {
     const pr = ruleset.requirePR
-    rules.push({
-      type: 'pull_request',
-      parameters: {
-        required_approving_review_count: pr.approvals || 1,
-        dismiss_stale_reviews_on_push: pr.dismissStale || false,
-        require_code_owner_review: pr.codeOwners || false,
-        require_last_push_approval: pr.lastPushApproval || false,
-        required_review_thread_resolution: pr.resolveThreads || false
+    const parameters = {
+      required_approving_review_count: pr.approvals || 1,
+      dismiss_stale_reviews_on_push: pr.dismissStale || false,
+      require_code_owner_review: pr.codeOwners || false,
+      require_last_push_approval: pr.lastPushApproval || false,
+      required_review_thread_resolution: pr.resolveThreads || false
+    }
+    if (pr.requiredReviewers && pr.requiredReviewers.length) {
+      const required_reviewers = []
+      for (const r of pr.requiredReviewers) {
+        const team = JSON.parse(await gh(['api', `orgs/${org}/teams/${slugify(r.team)}`]))
+        required_reviewers.push({
+          file_patterns: r.filePatterns,
+          minimum_approvals: r.minApprovals !== undefined ? r.minApprovals : 1,
+          reviewer: { id: team.id, type: 'Team' }
+        })
       }
-    })
+      parameters.required_reviewers = required_reviewers
+    }
+    rules.push({ type: 'pull_request', parameters })
   }
 
   if (ruleset.requiredStatusChecks) {
