@@ -141,11 +141,39 @@ Each entry in `rulesets` supports:
 - `preventForcePush: true` — block force pushes
 - `requireLinearHistory: true` — require linear commit history (no merge commits)
 - `requireSignedCommits: true` — require signed commits
-- `requirePR: { approvals, dismissStale, codeOwners, lastPushApproval, resolveThreads, requiredReviewers }` — require pull requests. `requiredReviewers` (beta) is `[{ team, filePatterns, minApprovals }]` — each entry forces the named team to review when the PR touches matching files
+- `requirePR: { approvals, dismissStale, codeOwners, lastPushApproval, resolveThreads, requiredReviewers }` — require pull requests
+- `requirePR.requiredReviewers` — see "Required reviewers" below
 - `requiredStatusChecks: { strict, checks: [...] }` — required CI checks; `checks` is strings or `{ context, integrationId }`
 - `filePathRestrictions: ["..."]` — glob restrictions on which file paths can change
 - `requiredWorkflows: [{ path, repositoryId, ref }]` — required GitHub Actions workflows
 - `bypassActors: [...]` — entries: `{ team }`, `{ username }`, or `{ type: "OrganizationAdmin" }`, each with optional `mode: "always"|"pull_request"`
+
+#### Required reviewers (beta)
+
+`requirePR.requiredReviewers` lets you require specific teams to approve PRs that touch certain file paths. Each entry has:
+
+- `team` — name of an org team that must approve
+- `filePatterns` — array of fnmatch patterns; the team is required when a PR changes any matching file
+- `minApprovals` — minimum approvals from that team (default `1`; `0` adds the team as a reviewer without requiring approval)
+
+Example: infra team must approve any change to Terraform files or `infra/`, with two approvals; security team must approve any change under `auth/`:
+
+```json
+{
+  "name": "main-protection",
+  "include": ["~DEFAULT_BRANCH"],
+  "preventForcePush": true,
+  "requirePR": {
+    "approvals": 1,
+    "requiredReviewers": [
+      { "team": "infra", "filePatterns": ["**/*.tf", "infra/**"], "minApprovals": 2 },
+      { "team": "security", "filePatterns": ["auth/**"] }
+    ]
+  }
+}
+```
+
+GitHub flags this API as beta — the parameter shape may change on their side.
 
 ```json
 {
