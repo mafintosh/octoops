@@ -96,6 +96,37 @@ Top-level repo fields for basic settings:
 
 Omitting a field leaves the current GitHub value untouched. Setting it makes octoops reconcile it.
 
+### Secrets
+
+Reference a local dotenv-style file from a repo or environment:
+
+```json
+{
+  "name": "my-repo",
+  "secrets": ".secrets",
+  "environments": [
+    { "name": "production", "secrets": ".secrets.prod" }
+  ]
+}
+```
+
+File format (`KEY=value`, `#` comments, optional quoting):
+
+```
+NPM_TOKEN=abc123
+SLACK_WEBHOOK="https://hooks.slack.com/..."
+# tokens
+GH_TOKEN='ghp_...'
+```
+
+Behavior:
+
+- Paths resolve relative to the config file
+- Missing file → octoops prints `skip-secrets` and leaves existing secrets/state alone (so you can `.gitignore` the secrets file and only run apply where it's present)
+- Each secret is hashed with a per-secret HMAC-SHA256 salt (`[salt, hmac]`); state never holds plaintext, and hashes can't be correlated across secrets/repos/state files
+- Only secrets whose value changed are PUT to GitHub; secrets removed from the file are deleted from GitHub
+- Values are sent to `gh secret set` over stdin (never on the command line, never logged)
+
 ### Ruleset fields
 
 Each entry in `rulesets` supports:

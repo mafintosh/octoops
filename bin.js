@@ -18,6 +18,7 @@ const applyCmd = command(
     await apply(config, {
       dry: applyCmd.flags.dryRun,
       statePath,
+      configPath,
       audit: applyCmd.flags.audit,
       enterprise: applyCmd.flags.enterprise
     })

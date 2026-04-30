@@ -1,4 +1,5 @@
 const { spawn } = require('child_process')
+const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
@@ -306,6 +307,9 @@ function seed(config, opts = {}) {
     const repo = resolve(raw, presets)
     const key = config.org + '/' + repo.name
     const entry = {}
+    const existing = state[key] || {}
+    if (existing.secrets) entry.secrets = existing.secrets
+    if (existing.envSecrets) entry.envSecrets = existing.envSecrets
     if (repo.archived) entry.archived = true
     if (repo.description !== undefined) entry.description = repo.description
     if (repo.private !== undefined) entry.private = repo.private
@@ -528,6 +532,8 @@ function repoChanged(repo, prev) {
   if (changed(repo.environments, prev.environments)) return true
   if ((repo.rulesets || prev.rulesets) && changed(repo.rulesets, prev.rulesets)) return true
   if ((repo.npm || prev.npm) && changed(repo.npm, prev.npm)) return true
+  if (repo.secrets) return true
+  if (repo.environments && repo.environments.some((e) => e.secrets)) return true
   return false
 }
 
@@ -652,6 +658,24 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     for (const npm of npms) await reconcileNpm(org, repo.name, npm, dry)
   }
   if (repo.npm) done.npm = repo.npm
+
+  const configDir = opts.configPath ? path.dirname(opts.configPath) : null
+
+  if (repo.secrets && current) {
+    const next = await reconcileSecrets(org, repo.name, repo.secrets, prev.secrets, dry, null, configDir)
+    if (next) done.secrets = next
+  }
+
+  if (repo.environments && current) {
+    const envSecrets = prev.envSecrets || {}
+    const newEnvSecrets = {}
+    for (const env of repo.environments) {
+      if (!env.secrets) continue
+      const next = await reconcileSecrets(org, repo.name, env.secrets, envSecrets[env.name], dry, env.name, configDir)
+      if (next) newEnvSecrets[env.name] = next
+    }
+    if (Object.keys(newEnvSecrets).length) done.envSecrets = newEnvSecrets
+  }
 }
 
 async function reconcileSettings(org, repo, dry) {
@@ -1257,6 +1281,80 @@ async function createRepo(org, repo) {
   await gh(args)
 }
 
+function parseSecretsFile(filePath) {
+  const text = fs.readFileSync(filePath, 'utf-8')
+  const out = {}
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eq = trimmed.indexOf('=')
+    if (eq === -1) continue
+    const key = trimmed.slice(0, eq).trim()
+    let value = trimmed.slice(eq + 1).trim()
+    if (value.length >= 2) {
+      const first = value[0]
+      const last = value[value.length - 1]
+      if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+        value = value.slice(1, -1)
+      }
+    }
+    out[key] = value
+  }
+  return out
+}
+
+function hashSecret(salt, value) {
+  return crypto.createHmac('sha256', Buffer.from(salt, 'hex')).update(value).digest('hex')
+}
+
+function randSalt() {
+  return crypto.randomBytes(32).toString('hex')
+}
+
+async function reconcileSecrets(org, name, file, prevState, dry, envName, configDir) {
+  const filePath = path.resolve(configDir || '.', file)
+  if (!fs.existsSync(filePath)) {
+    print(dry, 'skip-secrets', `${org}/${name}`, (envName ? envName + ' ' : '') + 'file missing: ' + file)
+    return prevState || null
+  }
+  const desired = parseSecretsFile(filePath)
+  const prev = prevState || {}
+  const newState = {}
+
+  for (const key of Object.keys(desired)) {
+    const value = desired[key]
+    const prevEntry = prev[key]
+    if (Array.isArray(prevEntry) && prevEntry.length === 2 && hashSecret(prevEntry[0], value) === prevEntry[1]) {
+      newState[key] = prevEntry
+      continue
+    }
+    print(dry, 'set-secret', `${org}/${name}`, (envName ? envName + '/' : '') + key)
+    if (!dry) {
+      const args = ['secret', 'set', key, '--repo', `${org}/${name}`]
+      if (envName) args.push('--env', envName)
+      await gh(args, { rawBody: value })
+    }
+    const salt = randSalt()
+    newState[key] = [salt, hashSecret(salt, value)]
+  }
+
+  for (const key of Object.keys(prev)) {
+    if (key in desired) continue
+    print(dry, 'remove-secret', `${org}/${name}`, (envName ? envName + '/' : '') + key)
+    if (!dry) {
+      const args = ['secret', 'delete', key, '--repo', `${org}/${name}`]
+      if (envName) args.push('--env', envName)
+      try {
+        await gh(args)
+      } catch (err) {
+        if (!/Not Found/.test(err.message)) throw err
+      }
+    }
+  }
+
+  return newState
+}
+
 function slugify(name) {
   return name.toLowerCase().replace(/\s+/g, '-')
 }
@@ -1315,6 +1413,8 @@ function run(cmd, args, opts = {}) {
 
     if (opts.body) {
       child.stdin.write(JSON.stringify(opts.body))
+    } else if (opts.rawBody !== undefined) {
+      child.stdin.write(opts.rawBody)
     }
     child.stdin.end()
   })
