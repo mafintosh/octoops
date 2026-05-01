@@ -40,7 +40,7 @@ async function importOrg(org, opts = {}) {
 
   if (!only || only.has('teams')) {
     console.log('fetching org teams...')
-    const orgTeams = await importOrgTeams(org)
+    const orgTeams = await importOrgTeams(org, opts.teams)
     if (orgTeams.length) config.teams = orgTeams
   }
 
@@ -67,8 +67,21 @@ async function importOrg(org, opts = {}) {
   return config
 }
 
-async function importOrgTeams(org) {
-  const teams = JSON.parse(await gh(['api', `orgs/${org}/teams`, '--paginate']))
+async function importOrgTeams(org, filterNames) {
+  let teams
+  if (filterNames && filterNames.length) {
+    teams = []
+    for (const name of filterNames) {
+      const slug = slugify(name)
+      try {
+        teams.push(JSON.parse(await gh(['api', `orgs/${org}/teams/${slug}`])))
+      } catch (err) {
+        if (!/Not Found/.test(err.message)) throw err
+      }
+    }
+  } else {
+    teams = JSON.parse(await gh(['api', `orgs/${org}/teams`, '--paginate']))
+  }
   const result = []
 
   for (const team of teams) {
@@ -344,7 +357,10 @@ async function resync(config, opts = {}) {
   const importOpts = {}
   const only = []
   if (config.admins || config.members) only.push('members')
-  if (config.teams) only.push('teams')
+  if (config.teams) {
+    only.push('teams')
+    importOpts.teams = config.teams.map((t) => t.name)
+  }
   if (config.repos && config.repos.length) {
     only.push('repos')
     importOpts.repos = config.repos.map((r) => r.name)
