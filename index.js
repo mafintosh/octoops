@@ -558,6 +558,7 @@ function repoChanged(repo, prev) {
   if ((repo.npm || prev.npm) && changed(repo.npm, prev.npm)) return true
   if (repo.secrets) return true
   if (repo.environments && repo.environments.some((e) => e.secrets)) return true
+  if (repo.init && !prev.initialized) return true
   return false
 }
 
@@ -598,8 +599,28 @@ async function reconcile(org, repo, prev, dry, done, opts) {
       if (repo.description !== undefined) prev.description = repo.description
       if (repo.private !== undefined) prev.private = repo.private
       if (repo.internal !== undefined) prev.internal = repo.internal
+      if (repo.init) done.initialized = true
     }
     current = true
+  }
+
+  if (repo.init && !prev.initialized && !done.initialized) {
+    let branches = []
+    try {
+      branches = JSON.parse(await gh(['api', `repos/${org}/${repo.name}/branches`]))
+    } catch {}
+    if (branches.length === 0) {
+      print(dry, 'init-readme', `${org}/${repo.name}`)
+      if (!dry) {
+        await gh(['api', `repos/${org}/${repo.name}/contents/README.md`, '--method', 'PUT', '--input', '-'], {
+          body: {
+            message: 'Initial commit',
+            content: Buffer.from('# ' + repo.name + '\n').toString('base64')
+          }
+        })
+      }
+    }
+    done.initialized = true
   }
 
   const settings = {}
