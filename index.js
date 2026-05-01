@@ -158,7 +158,7 @@ async function importRepo(org, name) {
     if (bp.required_pull_request_reviews) {
       const pr = bp.required_pull_request_reviews
       rule.requiredReviews = {}
-      if (pr.required_approving_review_count) {
+      if (pr.required_approving_review_count !== undefined) {
         rule.requiredReviews.approvals = pr.required_approving_review_count
       }
       if (pr.dismiss_stale_reviews) rule.requiredReviews.dismissStale = true
@@ -209,7 +209,7 @@ async function importRepo(org, name) {
           if (rule.type === 'required_signatures') r.requireSignedCommits = true
           if (rule.type === 'pull_request' && rule.parameters) {
             r.requirePR = {}
-            if (rule.parameters.required_approving_review_count) {
+            if (rule.parameters.required_approving_review_count !== undefined) {
               r.requirePR.approvals = rule.parameters.required_approving_review_count
             }
             if (rule.parameters.dismiss_stale_reviews_on_push) r.requirePR.dismissStale = true
@@ -959,7 +959,7 @@ async function reconcileBranchProtection(org, name, rule, dry) {
     enforce_admins: enforceAdmins,
     required_pull_request_reviews: requiredReviews
       ? {
-          required_approving_review_count: requiredReviews.approvals || 1,
+          required_approving_review_count: requiredReviews.approvals ?? 1,
           dismiss_stale_reviews: requiredReviews.dismissStale || false,
           require_code_owner_reviews: requiredReviews.codeOwners || false
         }
@@ -1099,7 +1099,7 @@ async function buildRulesetBody(org, ruleset) {
   if (ruleset.requirePR) {
     const pr = ruleset.requirePR
     const parameters = {
-      required_approving_review_count: pr.approvals || 1,
+      required_approving_review_count: pr.approvals ?? 1,
       dismiss_stale_reviews_on_push: pr.dismissStale || false,
       require_code_owner_review: pr.codeOwners || false,
       require_last_push_approval: pr.lastPushApproval || false,
