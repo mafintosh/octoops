@@ -275,7 +275,7 @@ function filter(config, opts = {}) {
   if (opts.pruneTeams && out.teams) {
     const referenced = new Set()
     for (const raw of out.repos || []) {
-      const repo = resolve(raw, presets)
+      const repo = resolve(resolveDefaults(raw, out.defaults), presets)
       if (!Array.isArray(repo.teams)) continue
       for (const t of repo.teams) referenced.add(t.name)
     }
@@ -325,7 +325,7 @@ function seed(config, opts = {}) {
   }
 
   for (const raw of config.repos || []) {
-    const repo = resolve(raw, presets)
+    const repo = resolve(resolveDefaults(raw, config.defaults), presets)
     const key = config.org + '/' + repo.name
     const entry = {}
     const existing = state[key] || {}
@@ -469,7 +469,7 @@ async function apply(config, opts = {}) {
     }
 
     for (const raw of config.repos || []) {
-      const repo = resolve(raw, presets)
+      const repo = resolve(resolveDefaults(raw, config.defaults), presets)
       const key = config.org + '/' + repo.name
       const prev = state[key] || {}
       const done = {}
@@ -528,6 +528,42 @@ function resolve(repo, presets) {
       const val = presets[out[field]]
       if (!val) throw new Error('unknown preset "' + out[field] + '"')
       out[field] = val
+    }
+  }
+  return out
+}
+
+function resolveDefaults(repo, defaults) {
+  if (!repo.defaults || !defaults) return repo
+  const chain = []
+  const seen = new Set()
+  let name = repo.defaults
+  while (name) {
+    if (seen.has(name)) throw new Error('defaults cycle at "' + name + '"')
+    seen.add(name)
+    const entry = defaults[name]
+    if (!entry) throw new Error('unknown defaults "' + name + '"')
+    chain.push(entry)
+    name = entry.extends
+  }
+  let merged = {}
+  for (let i = chain.length - 1; i >= 0; i--) merged = deepMerge(merged, chain[i])
+  delete merged.extends
+  const out = deepMerge(merged, repo)
+  delete out.defaults
+  return out
+}
+
+function deepMerge(base, overlay) {
+  if (Array.isArray(overlay) || overlay === null || typeof overlay !== 'object') return overlay
+  if (Array.isArray(base) || base === null || typeof base !== 'object') return { ...overlay }
+  const out = { ...base }
+  for (const key of Object.keys(overlay)) {
+    const ov = overlay[key]
+    if (ov && typeof ov === 'object' && !Array.isArray(ov) && out[key] && typeof out[key] === 'object' && !Array.isArray(out[key])) {
+      out[key] = deepMerge(out[key], ov)
+    } else {
+      out[key] = ov
     }
   }
   return out

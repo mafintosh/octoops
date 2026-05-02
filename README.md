@@ -96,6 +96,48 @@ Top-level repo fields for basic settings:
 
 Omitting a field leaves the current GitHub value untouched. Setting it makes octoops reconcile it.
 
+### Defaults
+
+Define named defaults at the top level and let repos opt in via `defaults: "name"`. Defaults can chain via `extends`:
+
+```json
+{
+  "org": "my-org",
+  "defaults": {
+    "base": {
+      "private": true,
+      "merging": { "squashOnly": true, "deleteBranchOnMerge": true },
+      "wiki": false,
+      "projects": false
+    },
+    "service": {
+      "extends": "base",
+      "teams": [{ "name": "backend", "permission": "write" }],
+      "rulesets": "default-rules"
+    },
+    "oss-module": {
+      "extends": "base",
+      "private": false,
+      "rulesets": "oss-rules"
+    }
+  },
+  "repos": [
+    { "name": "api", "defaults": "service" },
+    { "name": "web", "defaults": "service", "topics": ["frontend"] },
+    { "name": "lib-foo", "defaults": "oss-module" },
+    { "name": "internal-thing" }
+  ]
+}
+```
+
+Resolution rules:
+
+- Walk the `extends` chain bottom-up. Cycles or unknown names are an error.
+- Objects deep-merge (so a repo can override `merging.squashOnly` without clobbering `merging.deleteBranchOnMerge`).
+- Arrays and scalars replace.
+- Repo fields override the resolved defaults.
+- After defaults are applied, preset resolution runs as usual (so `rulesets: "default-rules"` still resolves through `presets`).
+
 ### Secrets
 
 Reference a local dotenv-style file from a repo or environment:
