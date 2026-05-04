@@ -1300,9 +1300,16 @@ async function ensureNpmPackage(pkg, dry) {
 async function reconcileNpm(org, repoName, npm, dry) {
   const pkg = npm.package || repoName
   const tp = npm.trustedPublishing
-  if (!tp) return
+
+  if (!tp && !npm.maintainers) return
 
   await ensureNpmPackage(pkg, dry)
+
+  if (npm.maintainers) {
+    await reconcileNpmMaintainers(pkg, npm.maintainers, dry)
+  }
+
+  if (!tp) return
 
   const setArgs = [
     'trust',
@@ -1342,6 +1349,48 @@ async function reconcileNpm(org, repoName, npm, dry) {
   }
 
   await run('npm', setArgs, { interactive: true })
+}
+
+async function reconcileNpmMaintainers(pkg, desired, dry) {
+  let me = ''
+  try {
+    me = (await run('npm', ['whoami'])).trim()
+  } catch (err) {
+    throw new Error('npm whoami failed - are you logged in? (' + err.message + ')')
+  }
+  if (!me) throw new Error('npm whoami returned empty - are you logged in?')
+
+  let listOut = ''
+  try {
+    listOut = await run('npm', ['owner', 'ls', pkg])
+  } catch (err) {
+    throw new Error('npm owner ls ' + pkg + ' failed: ' + err.message)
+  }
+
+  const current = []
+  for (const line of listOut.split('\n')) {
+    const m = line.match(/^[-*]?\s*(\S+)\s*<.*>\s*$/) || line.match(/^[-*]?\s*(\S+)\s*$/)
+    if (m && m[1] && m[1] !== '-') current.push(m[1])
+  }
+
+  const currentSet = new Set(current)
+  const desiredSet = new Set(desired)
+
+  for (const user of desired) {
+    if (currentSet.has(user)) continue
+    print(dry, 'npm-add-owner', pkg, user)
+    if (!dry) await run('npm', ['owner', 'add', user, pkg], { interactive: true })
+  }
+
+  for (const user of current) {
+    if (desiredSet.has(user)) continue
+    if (user === me) {
+      print(dry, 'npm-keep-self', pkg, user + ' (would remove but caller)')
+      continue
+    }
+    print(dry, 'npm-remove-owner', pkg, user)
+    if (!dry) await run('npm', ['owner', 'rm', user, pkg], { interactive: true })
+  }
 }
 
 async function getRepo(org, name) {

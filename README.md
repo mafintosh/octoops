@@ -394,6 +394,18 @@ For repos that publish multiple packages, use an array:
 ]
 ```
 
+You can also manage the package's npm maintainer list:
+
+```json
+"npm": {
+  "package": "my-module",
+  "maintainers": ["alice", "bob", "charlie"],
+  "trustedPublishing": { "workflow": "publish.yml", "environment": "npm" }
+}
+```
+
+Octoops adds anyone in `maintainers` who isn't already an owner and removes anyone who is an owner but not in the list — **except the caller** (whoever ran `octoops apply`). The caller is never removed, even if they're not listed in `maintainers`; you'll see a `npm-keep-self` log line. This prevents you from locking yourself out by mistake.
+
 ## Programmatic usage
 
 ```js
