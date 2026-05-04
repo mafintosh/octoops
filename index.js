@@ -1328,6 +1328,8 @@ async function reconcileNpm(org, repoName, npm, dry) {
     tp.workflow,
     '--repository',
     `${org}/${repoName}`,
+    '--subject', 
+    `repo:${org}/${repoName}:ref:refs/heads/main`,
     '--yes'
   ]
   if (tp.environment) setArgs.push('--environment', tp.environment)
