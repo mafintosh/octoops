@@ -1328,7 +1328,7 @@ async function reconcileNpm(org, repoName, npm, dry) {
     tp.workflow,
     '--repository',
     `${org}/${repoName}`,
-    '--subject', 
+    '--subject',
     `repo:${org}/${repoName}:ref:refs/heads/main`,
     '--yes'
   ]
