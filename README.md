@@ -132,11 +132,32 @@ Define named defaults at the top level and let repos opt in via `defaults: "name
 
 Resolution rules:
 
-- Walk the `extends` chain bottom-up. Cycles or unknown names are an error.
+- `extends` and `defaults` accept a string or an array. Array form is **left-to-right, rightmost wins**: `extends: ["a", "b"]` starts from `a` and layers `b` on top.
+- Each name is fully resolved (its own `extends` walked) before being used as a layer.
 - Objects deep-merge (so a repo can override `merging.squashOnly` without clobbering `merging.deleteBranchOnMerge`).
 - Arrays and scalars replace.
 - Repo fields override the resolved defaults.
+- Cycles or unknown names are an error.
 - After defaults are applied, preset resolution runs as usual (so `rulesets: "default-rules"` still resolves through `presets`).
+
+Example with mixin composition:
+
+```json
+{
+  "defaults": {
+    "private-base": { "private": true, "wiki": false },
+    "squash-merging": { "merging": { "squashOnly": true, "deleteBranchOnMerge": true } },
+    "service": {
+      "extends": ["private-base", "squash-merging"],
+      "teams": [{ "name": "backend", "permission": "write" }]
+    }
+  },
+  "repos": [
+    { "name": "api", "defaults": "service" },
+    { "name": "frontend", "defaults": ["service", "frontend-mixin"] }
+  ]
+}
+```
 
 ### Secrets
 

@@ -535,23 +535,32 @@ function resolve(repo, presets) {
 
 function resolveDefaults(repo, defaults) {
   if (!repo.defaults || !defaults) return repo
-  const chain = []
-  const seen = new Set()
-  let name = repo.defaults
-  while (name) {
-    if (seen.has(name)) throw new Error('defaults cycle at "' + name + '"')
-    seen.add(name)
-    const entry = defaults[name]
-    if (!entry) throw new Error('unknown defaults "' + name + '"')
-    chain.push(entry)
-    name = entry.extends
-  }
+  const names = Array.isArray(repo.defaults) ? repo.defaults : [repo.defaults]
   let merged = {}
-  for (let i = chain.length - 1; i >= 0; i--) merged = deepMerge(merged, chain[i])
+  for (const name of names) {
+    merged = deepMerge(merged, resolveDefaultsEntry(name, defaults, new Set()))
+  }
   delete merged.extends
   const out = deepMerge(merged, repo)
   delete out.defaults
   return out
+}
+
+function resolveDefaultsEntry(name, defaults, seen) {
+  if (seen.has(name)) throw new Error('defaults cycle at "' + name + '"')
+  const entry = defaults[name]
+  if (!entry) throw new Error('unknown defaults "' + name + '"')
+  const path = new Set(seen)
+  path.add(name)
+
+  let merged = {}
+  if (entry.extends) {
+    const parents = Array.isArray(entry.extends) ? entry.extends : [entry.extends]
+    for (const parent of parents) {
+      merged = deepMerge(merged, resolveDefaultsEntry(parent, defaults, path))
+    }
+  }
+  return deepMerge(merged, entry)
 }
 
 function deepMerge(base, overlay) {
