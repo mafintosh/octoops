@@ -789,6 +789,17 @@ async function reconcileSettings(org, repo, dry) {
     }
   }
 
+  if (patch.default_branch === 'main' && !dry) {
+    let branches = []
+    try {
+      branches = JSON.parse(await gh(['api', `repos/${org}/${repo.name}/branches`]))
+    } catch {}
+    if (branches.length === 0) {
+      print(dry, 'skip-default-branch', `${org}/${repo.name}`, 'repo is empty, main will be created on first commit')
+      delete patch.default_branch
+    }
+  }
+
   if (!Object.keys(patch).length) return
 
   print(dry, 'update', `${org}/${repo.name}`, Object.keys(patch).join(', '))
