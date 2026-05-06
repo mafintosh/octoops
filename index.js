@@ -1093,8 +1093,17 @@ async function reconcileRulesets(org, repoName, desired, prev, dry) {
       const existing = currentByName.get(removed.name)
       if (!existing) continue
       print(dry, 'remove-ruleset', `${org}/${repoName}`, removed.name)
-      if (!dry)
-        await gh(['api', `repos/${org}/${repoName}/rulesets/${existing.id}`, '--method', 'DELETE'])
+      if (!dry) {
+        try {
+          await gh(['api', `repos/${org}/${repoName}/rulesets/${existing.id}`, '--method', 'DELETE'])
+        } catch (err) {
+          if (rulesetUnavailable(err)) {
+            print(dry, 'skip-ruleset', `${org}/${repoName}`, removed.name + ' (plan upgrade required)')
+            return
+          }
+          throw err
+        }
+      }
     }
   }
 
@@ -1106,30 +1115,42 @@ async function reconcileRulesets(org, repoName, desired, prev, dry) {
     const current = await getRulesets(org, repoName)
     const existing = current.find((r) => r.name === ruleset.name)
 
-    if (existing) {
-      const full = JSON.parse(await gh(['api', `repos/${org}/${repoName}/rulesets/${existing.id}`]))
-      if (rulesetMatches(full, body)) continue
-      print(dry, 'update-ruleset', `${org}/${repoName}`, ruleset.name)
-      if (!dry)
-        await gh(
-          [
-            'api',
-            `repos/${org}/${repoName}/rulesets/${existing.id}`,
-            '--method',
-            'PUT',
-            '--input',
-            '-'
-          ],
-          { body }
-        )
-    } else {
-      print(dry, 'create-ruleset', `${org}/${repoName}`, ruleset.name)
-      if (!dry)
-        await gh(['api', `repos/${org}/${repoName}/rulesets`, '--method', 'POST', '--input', '-'], {
-          body
-        })
+    try {
+      if (existing) {
+        const full = JSON.parse(await gh(['api', `repos/${org}/${repoName}/rulesets/${existing.id}`]))
+        if (rulesetMatches(full, body)) continue
+        print(dry, 'update-ruleset', `${org}/${repoName}`, ruleset.name)
+        if (!dry)
+          await gh(
+            [
+              'api',
+              `repos/${org}/${repoName}/rulesets/${existing.id}`,
+              '--method',
+              'PUT',
+              '--input',
+              '-'
+            ],
+            { body }
+          )
+      } else {
+        print(dry, 'create-ruleset', `${org}/${repoName}`, ruleset.name)
+        if (!dry)
+          await gh(['api', `repos/${org}/${repoName}/rulesets`, '--method', 'POST', '--input', '-'], {
+            body
+          })
+      }
+    } catch (err) {
+      if (rulesetUnavailable(err)) {
+        print(dry, 'skip-ruleset', `${org}/${repoName}`, ruleset.name + ' (plan upgrade required)')
+        return
+      }
+      throw err
     }
   }
+}
+
+function rulesetUnavailable(err) {
+  return /Upgrade to GitHub|make this repository public/i.test(err.message || '')
 }
 
 async function buildRulesetBody(org, ruleset) {
