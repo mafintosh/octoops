@@ -159,6 +159,21 @@ Example with mixin composition:
 }
 ```
 
+### Environments
+
+Each entry in `environments` supports:
+
+- `name` — required
+- `reviewers: [{ team }]` — required-reviewer teams (deployments are gated until one approves). On private repos this requires GitHub Enterprise; otherwise octoops prints `skip-environments` unless `enterprise: true` is set
+- `preventSelfReview: true` — block the actor who triggered a deployment from approving it themselves
+- `secrets` — see "Secrets" below
+
+```json
+"environments": [
+  { "name": "npm", "reviewers": [{ "team": "release" }], "preventSelfReview": true }
+]
+```
+
 ### Secrets
 
 Reference a local dotenv-style file from a repo or environment:
