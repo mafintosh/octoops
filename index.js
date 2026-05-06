@@ -178,6 +178,7 @@ async function importRepo(org, name) {
           .filter((r) => r.type === 'Team')
           .map((r) => ({ team: r.reviewer.name }))
         if (reviewers.length) e.reviewers = reviewers
+        if (env.prevent_self_review) e.preventSelfReview = true
         entry.environments.push(e)
       }
     }
@@ -1042,6 +1043,7 @@ async function reconcileEnvironment(org, repoName, env, dry) {
   const current = await getEnvironment(org, repoName, env.name)
 
   const desiredReviewerSlugs = (env.reviewers || []).map((r) => slugify(r.team))
+  const desiredPreventSelfReview = env.preventSelfReview === true
 
   if (current) {
     const currentSlugs = (current.protection_rules || [])
@@ -1050,14 +1052,19 @@ async function reconcileEnvironment(org, repoName, env, dry) {
       .map((r) => r.reviewer.slug)
       .sort()
 
-    if (JSON.stringify(currentSlugs) === JSON.stringify([...desiredReviewerSlugs].sort())) return
+    const currentPreventSelfReview = current.prevent_self_review === true
+
+    if (
+      JSON.stringify(currentSlugs) === JSON.stringify([...desiredReviewerSlugs].sort()) &&
+      currentPreventSelfReview === desiredPreventSelfReview
+    ) return
   }
 
   print(
     dry,
     'environment',
     `${org}/${repoName}`,
-    `${env.name} reviewers=${desiredReviewerSlugs.join(',')}`
+    `${env.name} reviewers=${desiredReviewerSlugs.join(',')} preventSelfReview=${desiredPreventSelfReview}`
   )
   if (dry) return
 
@@ -1070,7 +1077,7 @@ async function reconcileEnvironment(org, repoName, env, dry) {
   await gh(
     ['api', `repos/${org}/${repoName}/environments/${env.name}`, '--method', 'PUT', '--input', '-'],
     {
-      body: { reviewers }
+      body: { reviewers, prevent_self_review: desiredPreventSelfReview }
     }
   )
 }
