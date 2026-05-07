@@ -1517,7 +1517,8 @@ async function createRepo(org, repo) {
     repo.internal === true ? '--internal' : repo.private === false ? '--public' : '--private'
   ]
   if (repo.description) args.push('--description', repo.description)
-  if (repo.init) args.push('--add-readme')
+  if (repo.template) args.push('--template', repo.template)
+  else if (repo.init) args.push('--add-readme')
   await gh(args)
 }
 

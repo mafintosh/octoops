@@ -106,6 +106,7 @@ Top-level repo fields for basic settings:
 - `projects: true|false` — enable/disable repo projects
 - `archived: true` — archive the repo (skips further reconcile). Removing this from the config (when state has it) unarchives the repo
 - `init: true` — initialize the repo with a README so the default branch exists. On create, passes `--add-readme` to `gh repo create`. On an existing empty repo (no branches), creates `README.md` retroactively. Once initialized, recorded in state and not re-checked
+- `template: "owner/repo"` — create the repo from a template repo. Only used at create time. Mutually exclusive with `init` (templates already have content)
 - `merging` — `{ squashOnly, deleteBranchOnMerge }`
 
 Omitting a field leaves the current GitHub value untouched. Setting it makes octoops reconcile it.
