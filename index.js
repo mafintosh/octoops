@@ -1452,12 +1452,15 @@ async function reconcileNpmMaintainers(pkg, desired, dry) {
     throw new Error('npm owner ls ' + pkg + ' failed: ' + err.message)
   }
 
+  if (!exists) {
+    print(dry, 'skip-maintainers', pkg, 'package not on npm yet, will sync on next apply')
+    return
+  }
+
   const current = []
-  if (exists) {
-    for (const line of listOut.split('\n')) {
-      const m = line.match(/^[-*]?\s*(\S+)\s*<.*>\s*$/) || line.match(/^[-*]?\s*(\S+)\s*$/)
-      if (m && m[1] && m[1] !== '-') current.push(m[1])
-    }
+  for (const line of listOut.split('\n')) {
+    const m = line.match(/^[-*]?\s*(\S+)\s*<.*>\s*$/) || line.match(/^[-*]?\s*(\S+)\s*$/)
+    if (m && m[1] && m[1] !== '-') current.push(m[1])
   }
 
   const currentSet = new Set(current)
