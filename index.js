@@ -529,7 +529,7 @@ function resolve(repo, presets) {
     if (typeof val === 'string') {
       if (!presets || !(val in presets)) throw new Error('unknown preset "' + val + '"')
       out[field] = presets[val]
-    } else if (Array.isArray(val)) {
+    } else if (Array.isArray(val) && field !== 'topics') {
       out[field] = val.flatMap((item) => {
         if (typeof item !== 'string') return [item]
         if (!presets || !(item in presets)) throw new Error('unknown preset "' + item + '"')
