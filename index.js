@@ -774,9 +774,15 @@ async function reconcile(org, repo, prev, dry, done, opts) {
 
   if (repo.npm && changed(repo.npm, prev.npm)) {
     const npms = Array.isArray(repo.npm) ? repo.npm : [repo.npm]
-    for (const npm of npms) await reconcileNpm(org, repo.name, npm, dry)
+    let allOk = true
+    for (const npm of npms) {
+      const ok = await reconcileNpm(org, repo.name, npm, dry)
+      if (!ok) allOk = false
+    }
+    if (allOk) done.npm = repo.npm
+  } else if (repo.npm) {
+    done.npm = repo.npm
   }
-  if (repo.npm) done.npm = repo.npm
 
   const configDir = opts.configPath ? path.dirname(opts.configPath) : null
 
@@ -1382,15 +1388,16 @@ async function reconcileNpm(org, repoName, npm, dry) {
   const pkg = npm.package || repoName
   const tp = npm.trustedPublishing
 
-  if (!tp && !npm.maintainers) return
+  if (!tp && !npm.maintainers) return true
 
   await ensureNpmPackage(pkg, dry)
 
+  let ok = true
   if (npm.maintainers) {
-    await reconcileNpmMaintainers(pkg, npm.maintainers, dry)
+    ok = await reconcileNpmMaintainers(pkg, npm.maintainers, dry)
   }
 
-  if (!tp) return
+  if (!tp) return ok
 
   const setArgs = [
     'trust',
@@ -1423,13 +1430,14 @@ async function reconcileNpm(org, repoName, npm, dry) {
     (c) => c.type === 'github' && c.repository === `${org}/${repoName}` && c.file === tp.workflow
   )
 
-  if (match) return
+  if (match) return ok
 
   for (const c of current) {
     if (c.id) await run('npm', ['trust', 'revoke', pkg, '--id', c.id], { interactive: true })
   }
 
   await run('npm', setArgs, { interactive: true })
+  return ok
 }
 
 async function reconcileNpmMaintainers(pkg, desired, dry) {
@@ -1454,7 +1462,7 @@ async function reconcileNpmMaintainers(pkg, desired, dry) {
 
   if (!exists) {
     print(dry, 'skip-maintainers', pkg, 'package not on npm yet, will sync on next apply')
-    return
+    return false
   }
 
   const current = []
@@ -1462,6 +1470,8 @@ async function reconcileNpmMaintainers(pkg, desired, dry) {
     const m = line.match(/^[-*]?\s*(\S+)\s*<.*>\s*$/) || line.match(/^[-*]?\s*(\S+)\s*$/)
     if (m && m[1] && m[1] !== '-') current.push(m[1])
   }
+
+  let ok = true
 
   const currentSet = new Set(current)
   const desiredSet = new Set(desired)
@@ -1472,6 +1482,7 @@ async function reconcileNpmMaintainers(pkg, desired, dry) {
     if (!dry) {
       const res = await run('npm', ['owner', 'add', user, pkg], { interactive: true, allowFailure: true })
       if (res.code !== 0) {
+        ok = false
         print(dry, 'warn-maintainers', pkg, 'npm owner add ' + user + ' failed - is the caller an existing owner?')
       }
     }
@@ -1487,10 +1498,13 @@ async function reconcileNpmMaintainers(pkg, desired, dry) {
     if (!dry) {
       const res = await run('npm', ['owner', 'rm', user, pkg], { interactive: true, allowFailure: true })
       if (res.code !== 0) {
+        ok = false
         print(dry, 'warn-maintainers', pkg, 'npm owner rm ' + user + ' failed')
       }
     }
   }
+
+  return ok
 }
 
 async function getRepo(org, name) {
