@@ -1442,16 +1442,22 @@ async function reconcileNpmMaintainers(pkg, desired, dry) {
   if (!me) throw new Error('npm whoami returned empty - are you logged in?')
 
   let listOut = ''
+  let exists = true
   try {
-    listOut = await run('npm', ['owner', 'ls', pkg])
+    const res = await run('npm', ['owner', 'ls', pkg], { allowFailure: true })
+    if (res.code === 0) listOut = res.stdout
+    else if (/404|E404|not found/i.test(res.stderr)) exists = false
+    else throw new Error('npm owner ls ' + pkg + ' failed: ' + res.stderr)
   } catch (err) {
     throw new Error('npm owner ls ' + pkg + ' failed: ' + err.message)
   }
 
   const current = []
-  for (const line of listOut.split('\n')) {
-    const m = line.match(/^[-*]?\s*(\S+)\s*<.*>\s*$/) || line.match(/^[-*]?\s*(\S+)\s*$/)
-    if (m && m[1] && m[1] !== '-') current.push(m[1])
+  if (exists) {
+    for (const line of listOut.split('\n')) {
+      const m = line.match(/^[-*]?\s*(\S+)\s*<.*>\s*$/) || line.match(/^[-*]?\s*(\S+)\s*$/)
+      if (m && m[1] && m[1] !== '-') current.push(m[1])
+    }
   }
 
   const currentSet = new Set(current)
