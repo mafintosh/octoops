@@ -1469,7 +1469,12 @@ async function reconcileNpmMaintainers(pkg, desired, dry) {
   for (const user of desired) {
     if (currentSet.has(user)) continue
     print(dry, 'npm-add-owner', pkg, user)
-    if (!dry) await run('npm', ['owner', 'add', user, pkg], { interactive: true })
+    if (!dry) {
+      const res = await run('npm', ['owner', 'add', user, pkg], { interactive: true, allowFailure: true })
+      if (res.code !== 0) {
+        print(dry, 'warn-maintainers', pkg, 'npm owner add ' + user + ' failed - is the caller an existing owner?')
+      }
+    }
   }
 
   for (const user of current) {
@@ -1479,7 +1484,12 @@ async function reconcileNpmMaintainers(pkg, desired, dry) {
       continue
     }
     print(dry, 'npm-remove-owner', pkg, user)
-    if (!dry) await run('npm', ['owner', 'rm', user, pkg], { interactive: true })
+    if (!dry) {
+      const res = await run('npm', ['owner', 'rm', user, pkg], { interactive: true, allowFailure: true })
+      if (res.code !== 0) {
+        print(dry, 'warn-maintainers', pkg, 'npm owner rm ' + user + ' failed')
+      }
+    }
   }
 }
 
