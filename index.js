@@ -1360,8 +1360,8 @@ async function getEnvironment(org, name, env) {
 }
 
 async function ensureNpmPackage(pkg, dry) {
-  const { code } = await run('npm', ['view', pkg, 'name'], { allowFailure: true })
-  if (code === 0) return
+  const res = await run('npm', ['view', pkg, 'name'], { allowFailure: true })
+  if (res.code === 0 && res.stdout && res.stdout.trim() === pkg) return
 
   print(dry, 'npm-publish', pkg, 'placeholder 0.0.0')
   if (dry) return
