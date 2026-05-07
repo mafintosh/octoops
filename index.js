@@ -525,10 +525,17 @@ const PRESET_FIELDS = [
 function resolve(repo, presets) {
   const out = { ...repo }
   for (const field of PRESET_FIELDS) {
-    if (typeof out[field] === 'string') {
-      const val = presets[out[field]]
-      if (!val) throw new Error('unknown preset "' + out[field] + '"')
-      out[field] = val
+    const val = out[field]
+    if (typeof val === 'string') {
+      if (!presets || !(val in presets)) throw new Error('unknown preset "' + val + '"')
+      out[field] = presets[val]
+    } else if (Array.isArray(val)) {
+      out[field] = val.flatMap((item) => {
+        if (typeof item !== 'string') return [item]
+        if (!presets || !(item in presets)) throw new Error('unknown preset "' + item + '"')
+        const resolved = presets[item]
+        return Array.isArray(resolved) ? resolved : [resolved]
+      })
     }
   }
   return out

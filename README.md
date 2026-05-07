@@ -80,6 +80,20 @@ Respects GitHub API rate limits automatically.
 
 Any repo field that accepts an object or array can be a string instead, referencing a key in `presets`. Supported fields: `merging`, `teams`, `topics`, `branchProtection`, `environments`, `rulesets`, `npm`. This lets you define a config once and reuse it across repos.
 
+For array fields you can also mix preset references with inline objects element-by-element:
+
+```json
+"presets": {
+  "integrity": { "name": "integrity", "preventForcePush": true },
+  "tags": { "name": "tags", "target": "tag", "preventCreation": true }
+},
+"repos": [
+  { "name": "api", "rulesets": ["integrity", "tags", { "name": "ad-hoc", "preventDeletion": true }] }
+]
+```
+
+Each string element is looked up in `presets` (it can resolve to a single object or an array — arrays are spread). Inline objects pass through unchanged.
+
 ### Repo settings
 
 Top-level repo fields for basic settings:
