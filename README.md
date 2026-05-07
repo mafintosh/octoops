@@ -96,6 +96,46 @@ Top-level repo fields for basic settings:
 
 Omitting a field leaves the current GitHub value untouched. Setting it makes octoops reconcile it.
 
+### Sharing config across files
+
+A config file can `extends` one or more other files. This lets multiple teams share a common base of `defaults`, `presets`, etc:
+
+```json
+// shared.json
+{
+  "defaults": {
+    "base": { "private": true, "wiki": false }
+  },
+  "presets": {
+    "default-rules": [
+      { "name": "main", "preventForcePush": true, "requirePR": { "approvals": 1 } }
+    ]
+  }
+}
+```
+
+```json
+// team-a.json
+{
+  "extends": "../shared.json",
+  "org": "my-org",
+  "presets": {
+    "team-a-rules": [...]
+  },
+  "repos": [
+    { "name": "api", "defaults": "base" }
+  ]
+}
+```
+
+Resolution rules:
+
+- `extends` is a string or array of paths. Paths are relative to the file declaring them.
+- Files are loaded recursively (extended files can extend further). Cycles error.
+- Deep-merge: objects merge per key, arrays/scalars replace. So adding a preset in the leaf adds it to the inherited set; redefining a preset key replaces just that one.
+- The leaf's own fields override the merged base.
+- State files belong to the leaf config (`team-a.state.json`), not the shared file.
+
 ### Defaults
 
 Define named defaults at the top level and let repos opt in via `defaults: "name"`. Defaults can chain via `extends`:

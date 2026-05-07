@@ -12,7 +12,7 @@ const PERMISSIONS = {
   admin: 'admin'
 }
 
-module.exports = { apply, importOrg, seed, filter, resync }
+module.exports = { apply, importOrg, seed, filter, resync, loadConfig }
 
 const PERMISSIONS_REVERSE = {
   pull: 'read',
@@ -562,6 +562,27 @@ function resolveDefaultsEntry(name, defaults, seen) {
     }
   }
   return deepMerge(merged, entry)
+}
+
+function loadConfig(configPath) {
+  return loadConfigInner(path.resolve(configPath), new Set())
+}
+
+function loadConfigInner(configPath, seen) {
+  if (seen.has(configPath)) throw new Error('extends cycle at ' + configPath)
+  const path2 = new Set(seen)
+  path2.add(configPath)
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
+  if (!config.extends) return config
+  const refs = Array.isArray(config.extends) ? config.extends : [config.extends]
+  const dir = path.dirname(configPath)
+  let merged = {}
+  for (const ref of refs) {
+    const subPath = path.resolve(dir, ref)
+    merged = deepMerge(merged, loadConfigInner(subPath, path2))
+  }
+  delete config.extends
+  return deepMerge(merged, config)
 }
 
 function deepMerge(base, overlay) {

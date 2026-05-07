@@ -2,7 +2,7 @@
 
 const { command, summary, flag, arg } = require('paparam')
 const path = require('path')
-const { apply, importOrg, seed, filter, resync } = require('.')
+const { apply, importOrg, seed, filter, resync, loadConfig } = require('.')
 
 const applyCmd = command(
   'apply',
@@ -13,7 +13,7 @@ const applyCmd = command(
   arg('<config>', 'Path to config JSON file'),
   async function () {
     const configPath = path.resolve(applyCmd.args.config)
-    const config = require(configPath)
+    const config = loadConfig(configPath)
     const statePath = configPath.replace(/\.json$/, '.state.json')
     await apply(config, {
       dry: applyCmd.flags.dryRun,
@@ -58,7 +58,7 @@ const seedCmd = command(
   arg('<config>', 'Path to config JSON file'),
   function () {
     const configPath = path.resolve(seedCmd.args.config)
-    const config = require(configPath)
+    const config = loadConfig(configPath)
     const statePath = configPath.replace(/\.json$/, '.state.json')
     seed(config, { statePath })
   }
@@ -70,7 +70,7 @@ const resyncCmd = command(
   arg('<config>', 'Path to config JSON file'),
   async function () {
     const configPath = path.resolve(resyncCmd.args.config)
-    const config = require(configPath)
+    const config = loadConfig(configPath)
     const statePath = configPath.replace(/\.json$/, '.state.json')
     await resync(config, { statePath })
     console.log('resynced state to ' + statePath)
@@ -83,7 +83,7 @@ const listCmd = command(
   arg('<config>', 'Path to config JSON file'),
   function () {
     const configPath = path.resolve(listCmd.args.config)
-    const config = require(configPath)
+    const config = loadConfig(configPath)
     for (const repo of config.repos || []) console.log(repo.name)
   }
 )
@@ -98,7 +98,7 @@ const filterCmd = command(
   flag('--prune-members', 'Remove admins/members not referenced by any team'),
   function () {
     const configPath = path.resolve(filterCmd.args.config)
-    const config = require(configPath)
+    const config = loadConfig(configPath)
     const opts = {}
     if (filterCmd.flags.repos) {
       opts.repos = require('fs').readFileSync(path.resolve(filterCmd.flags.repos), 'utf8')
