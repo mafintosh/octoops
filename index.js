@@ -838,10 +838,29 @@ async function reconcileSettings(org, repo, dry) {
   if (!Object.keys(patch).length) return
 
   print(dry, 'update', `${org}/${repo.name}`, Object.keys(patch).join(', '))
-  if (!dry)
-    await gh(['api', `repos/${org}/${repo.name}`, '--method', 'PATCH', '--input', '-'], {
-      body: patch
-    })
+  if (!dry) {
+    try {
+      await gh(['api', `repos/${org}/${repo.name}`, '--method', 'PATCH', '--input', '-'], {
+        body: patch
+      })
+    } catch (err) {
+      if (/Validation Failed|HTTP 422/i.test(err.message) && (patch.private !== undefined || patch.visibility !== undefined)) {
+        const retry = { ...patch }
+        delete retry.private
+        delete retry.visibility
+        if (Object.keys(retry).length) {
+          print(dry, 'update-retry', `${org}/${repo.name}`, 'visibility rejected (likely a fork) — retrying without it')
+          await gh(['api', `repos/${org}/${repo.name}`, '--method', 'PATCH', '--input', '-'], {
+            body: retry
+          })
+        } else {
+          print(dry, 'skip-update', `${org}/${repo.name}`, 'visibility rejected (likely a fork) and no other fields')
+        }
+      } else {
+        throw err
+      }
+    }
+  }
 }
 
 async function reconcileTopics(org, name, topics, dry) {
