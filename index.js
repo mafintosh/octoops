@@ -1137,7 +1137,7 @@ async function reconcileRulesets(org, repoName, desired, prev, dry) {
           await gh(['api', `repos/${org}/${repoName}/rulesets/${existing.id}`, '--method', 'DELETE'])
         } catch (err) {
           if (rulesetUnavailable(err)) {
-            print(dry, 'skip-ruleset', `${org}/${repoName}`, removed.name + ' (plan upgrade required)')
+            print(dry, 'skip-ruleset', `${org}/${repoName}`, removed.name + ' (' + rulesetSkipReason(err) + ')')
             return
           }
           throw err
@@ -1180,7 +1180,7 @@ async function reconcileRulesets(org, repoName, desired, prev, dry) {
       }
     } catch (err) {
       if (rulesetUnavailable(err)) {
-        print(dry, 'skip-ruleset', `${org}/${repoName}`, ruleset.name + ' (plan upgrade required)')
+        print(dry, 'skip-ruleset', `${org}/${repoName}`, ruleset.name + ' (' + rulesetSkipReason(err) + ')')
         return
       }
       throw err
@@ -1189,7 +1189,20 @@ async function reconcileRulesets(org, repoName, desired, prev, dry) {
 }
 
 function rulesetUnavailable(err) {
-  return /Upgrade to GitHub|make this repository public/i.test(err.message || '')
+  const msg = err.message || ''
+  if (/Upgrade to GitHub|make this repository public/i.test(msg)) return true
+  if (/Validation Failed|HTTP 422/i.test(msg)) return true
+  return false
+}
+
+function rulesetSkipReason(err) {
+  const msg = err.message || ''
+  if (/Upgrade to GitHub|make this repository public/i.test(msg)) return 'plan upgrade required'
+  if (/Validation Failed|HTTP 422/i.test(msg)) {
+    const detail = msg.replace(/^.*?Validation Failed[:\-\s]*/i, '').replace(/\s+/g, ' ').trim()
+    return detail ? '422: ' + detail.slice(0, 200) : '422 validation failed'
+  }
+  return 'unsupported'
 }
 
 async function buildRulesetBody(org, ruleset) {
