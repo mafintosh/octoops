@@ -824,13 +824,16 @@ async function reconcileSettings(org, repo, dry) {
     }
   }
 
-  if (patch.default_branch === 'main' && !dry) {
+  if (patch.default_branch && !dry) {
     let branches = []
     try {
       branches = JSON.parse(await gh(['api', `repos/${org}/${repo.name}/branches`]))
     } catch {}
     if (branches.length === 0) {
-      print(dry, 'skip-default-branch', `${org}/${repo.name}`, 'repo is empty, main will be created on first commit')
+      print(dry, 'skip-default-branch', `${org}/${repo.name}`, 'repo is empty, ' + patch.default_branch + ' will be created on first commit')
+      delete patch.default_branch
+    } else if (!branches.some((b) => b.name === patch.default_branch)) {
+      print(dry, 'skip-default-branch', `${org}/${repo.name}`, patch.default_branch + ' branch does not exist on this repo')
       delete patch.default_branch
     }
   }
