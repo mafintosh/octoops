@@ -1449,15 +1449,20 @@ async function reconcileNpmMaintainers(pkg, desired, dry) {
   }
   if (!me) throw new Error('npm whoami returned empty - are you logged in?')
 
-  let listOut = ''
   let exists = true
+  let maintainers = []
   try {
-    const res = await run('npm', ['owner', 'ls', pkg], { allowFailure: true })
-    if (res.code === 0) listOut = res.stdout
-    else if (/404|E404|not found/i.test(res.stderr)) exists = false
-    else throw new Error('npm owner ls ' + pkg + ' failed: ' + res.stderr)
+    const res = await run('npm', ['view', pkg, 'maintainers', '--json'], { allowFailure: true })
+    if (res.code === 0) {
+      const parsed = res.stdout ? JSON.parse(res.stdout) : []
+      maintainers = Array.isArray(parsed) ? parsed : [parsed]
+    } else if (/404|E404|not found/i.test(res.stderr)) {
+      exists = false
+    } else {
+      throw new Error('npm view ' + pkg + ' maintainers failed: ' + res.stderr)
+    }
   } catch (err) {
-    throw new Error('npm owner ls ' + pkg + ' failed: ' + err.message)
+    throw new Error('npm view ' + pkg + ' maintainers failed: ' + err.message)
   }
 
   if (!exists) {
@@ -1466,9 +1471,14 @@ async function reconcileNpmMaintainers(pkg, desired, dry) {
   }
 
   const current = []
-  for (const line of listOut.split('\n')) {
-    const m = line.match(/^[-*]?\s*(\S+)\s*<.*>\s*$/) || line.match(/^[-*]?\s*(\S+)\s*$/)
-    if (m && m[1] && m[1] !== '-') current.push(m[1])
+  for (const m of maintainers) {
+    if (typeof m === 'string') {
+      const match = m.match(/^(\S+)\s*<.*>$/)
+      if (match) current.push(match[1])
+      else current.push(m)
+    } else if (m && m.name) {
+      current.push(m.name)
+    }
   }
 
   let ok = true
