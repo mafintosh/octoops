@@ -1552,7 +1552,11 @@ async function reconcileNpm(org, repoName, npm, dry) {
   const current = Array.isArray(parsed) ? parsed : [parsed]
 
   const match = current.find(
-    (c) => c.type === 'github' && c.repository === `${org}/${repoName}` && c.file === tp.workflow
+    (c) =>
+      c.type === 'github' &&
+      c.repository === `${org}/${repoName}` &&
+      c.file === tp.workflow &&
+      (c.environment || null) === (tp.environment || null)
   )
 
   if (match) return ok
