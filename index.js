@@ -1421,7 +1421,7 @@ async function buildRulesetBody(org, ruleset) {
     body.bypass_actors = []
     for (const a of ruleset.bypassActors) {
       let id = a.id || null
-      const type = a.type || (a.team ? 'Team' : a.username ? 'User' : null)
+      let type = a.type || (a.team ? 'Team' : a.username ? 'User' : a.app ? 'Integration' : null)
       if (a.team) {
         const team = JSON.parse(await gh(['api', `orgs/${org}/teams/${slugify(a.team)}`]))
         id = team.id
@@ -1429,6 +1429,11 @@ async function buildRulesetBody(org, ruleset) {
       if (a.username) {
         const user = JSON.parse(await gh(['api', `users/${a.username}`]))
         id = user.id
+      }
+      if (a.app) {
+        const app = JSON.parse(await gh(['api', `apps/${a.app}`]))
+        id = app.id
+        type = 'Integration'
       }
       body.bypass_actors.push({
         actor_id: id,

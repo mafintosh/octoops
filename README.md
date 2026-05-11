@@ -316,7 +316,7 @@ Each entry in `rulesets` supports:
 - `requiredStatusChecks: { strict, checks: [...] }` — required CI checks; `checks` is strings or `{ context, integrationId }`
 - `filePathRestrictions: ["..."]` — glob restrictions on which file paths can change
 - `requiredWorkflows: [{ path, repositoryId, ref }]` — required GitHub Actions workflows
-- `bypassActors: [...]` — entries: `{ team }`, `{ username }`, or `{ type: "OrganizationAdmin" }`, each with optional `mode: "always"|"pull_request"`
+- `bypassActors: [...]` — entries: `{ team }`, `{ username }`, `{ app }` (GitHub App slug, e.g. `"dependabot"`), or `{ type: "OrganizationAdmin" }`, each with optional `mode: "always"|"pull_request"`
 
 #### Required reviewers (beta)
 
