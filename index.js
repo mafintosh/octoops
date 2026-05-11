@@ -36,6 +36,17 @@ async function importOrg(org, opts = {}) {
       .sort()
     if (admins.length) config.admins = admins
     if (members.length) config.members = members
+
+    try {
+      const orgData = JSON.parse(await gh(['api', `orgs/${org}`]))
+      const sec = {}
+      if (orgData.advanced_security_enabled_for_new_repositories !== undefined) sec.advancedSecurity = orgData.advanced_security_enabled_for_new_repositories
+      if (orgData.secret_scanning_enabled_for_new_repositories !== undefined) sec.secretScanning = orgData.secret_scanning_enabled_for_new_repositories
+      if (orgData.secret_scanning_push_protection_enabled_for_new_repositories !== undefined) sec.secretScanningPushProtection = orgData.secret_scanning_push_protection_enabled_for_new_repositories
+      if (orgData.dependabot_alerts_enabled_for_new_repositories !== undefined) sec.dependabotAlerts = orgData.dependabot_alerts_enabled_for_new_repositories
+      if (orgData.dependabot_security_updates_enabled_for_new_repositories !== undefined) sec.dependabotSecurityUpdates = orgData.dependabot_security_updates_enabled_for_new_repositories
+      if (Object.keys(sec).length) config.security = sec
+    } catch {}
   }
 
   if (!only || only.has('teams')) {
@@ -129,6 +140,25 @@ async function importRepo(org, name) {
 
   if (repo.has_wiki === false) entry.wiki = false
   if (repo.has_projects === false) entry.projects = false
+
+  if (repo.security_and_analysis) {
+    const sa = repo.security_and_analysis
+    const sec = {}
+    if (sa.advanced_security) sec.advancedSecurity = sa.advanced_security.status === 'enabled'
+    if (sa.secret_scanning) sec.secretScanning = sa.secret_scanning.status === 'enabled'
+    if (sa.secret_scanning_push_protection) sec.secretScanningPushProtection = sa.secret_scanning_push_protection.status === 'enabled'
+    if (sa.secret_scanning_validity_checks) sec.secretScanningValidityChecks = sa.secret_scanning_validity_checks.status === 'enabled'
+    if (sa.dependabot_security_updates) sec.dependabotSecurityUpdates = sa.dependabot_security_updates.status === 'enabled'
+    if (Object.keys(sec).length) entry.security = sec
+  }
+
+  try {
+    const cs = JSON.parse(await gh(['api', `repos/${org}/${name}/code-scanning/default-setup`]))
+    if (cs && cs.state === 'configured') {
+      entry.security = entry.security || {}
+      entry.security.codeScanningDefaultSetup = true
+    }
+  } catch {}
 
   const { names: topics } = JSON.parse(await gh(['api', `repos/${org}/${name}/topics`]))
   if (topics.length) entry.topics = topics
@@ -340,6 +370,7 @@ function seed(config, opts = {}) {
     if (repo.merging) entry.merging = repo.merging
     if (repo.wiki !== undefined) entry.wiki = repo.wiki
     if (repo.projects !== undefined) entry.projects = repo.projects
+    if (repo.security) entry.security = repo.security
     if (repo.topics) entry.topics = repo.topics
     if (repo.teams) entry.teams = repo.teams
     if (repo.collaborators) entry.collaborators = repo.collaborators
@@ -423,6 +454,14 @@ async function apply(config, opts = {}) {
       if (!dry) {
         state.admins = config.admins
         state.members = config.members
+        if (opts.statePath) saveState(opts.statePath, state)
+      }
+    }
+
+    if (config.security && changed(config.security, state.security)) {
+      await reconcileOrgSecurity(config.org, config.security, dry)
+      if (!dry) {
+        state.security = config.security
         if (opts.statePath) saveState(opts.statePath, state)
       }
     }
@@ -617,7 +656,7 @@ function repoChanged(repo, prev) {
   if (prev.archived && !repo.archived) return true
   const settings = {}
   const prevSettings = {}
-  for (const k of ['description', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects']) {
+  for (const k of ['description', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'security']) {
     if (repo[k] === undefined) continue
     settings[k] = repo[k]
     prevSettings[k] = prev[k]
@@ -699,7 +738,7 @@ async function reconcile(org, repo, prev, dry, done, opts) {
 
   const settings = {}
   const prevSettings = {}
-  for (const k of ['description', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects']) {
+  for (const k of ['description', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'security']) {
     if (repo[k] === undefined) continue
     settings[k] = repo[k]
     prevSettings[k] = prev[k]
@@ -715,6 +754,11 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   if (repo.merging) done.merging = repo.merging
   if (repo.wiki !== undefined) done.wiki = repo.wiki
   if (repo.projects !== undefined) done.projects = repo.projects
+  if (repo.security) done.security = repo.security
+
+  if (repo.security && repo.security.codeScanningDefaultSetup !== undefined && current) {
+    await reconcileCodeScanning(org, repo.name, repo.security.codeScanningDefaultSetup, dry)
+  }
 
   if (repo.topics && current && changed(repo.topics, prev.topics)) {
     await reconcileTopics(org, repo.name, repo.topics, dry)
@@ -824,6 +868,17 @@ async function reconcileSettings(org, repo, dry) {
     }
   }
 
+  if (repo.security) {
+    const sa = {}
+    const s = repo.security
+    if (s.advancedSecurity !== undefined) sa.advanced_security = { status: s.advancedSecurity ? 'enabled' : 'disabled' }
+    if (s.secretScanning !== undefined) sa.secret_scanning = { status: s.secretScanning ? 'enabled' : 'disabled' }
+    if (s.secretScanningPushProtection !== undefined) sa.secret_scanning_push_protection = { status: s.secretScanningPushProtection ? 'enabled' : 'disabled' }
+    if (s.secretScanningValidityChecks !== undefined) sa.secret_scanning_validity_checks = { status: s.secretScanningValidityChecks ? 'enabled' : 'disabled' }
+    if (s.dependabotSecurityUpdates !== undefined) sa.dependabot_security_updates = { status: s.dependabotSecurityUpdates ? 'enabled' : 'disabled' }
+    if (Object.keys(sa).length) patch.security_and_analysis = sa
+  }
+
   if (patch.default_branch && !dry) {
     let branches = []
     try {
@@ -864,6 +919,41 @@ async function reconcileSettings(org, repo, dry) {
       }
     }
   }
+}
+
+async function reconcileCodeScanning(org, name, enabled, dry) {
+  let current = null
+  try {
+    current = JSON.parse(await gh(['api', `repos/${org}/${name}/code-scanning/default-setup`]))
+  } catch {}
+  const desired = enabled ? 'configured' : 'not-configured'
+  if (current && current.state === desired) return
+  print(dry, 'code-scanning', `${org}/${name}`, desired)
+  if (dry) return
+  try {
+    await gh(
+      ['api', `repos/${org}/${name}/code-scanning/default-setup`, '--method', 'PATCH', '--input', '-'],
+      { body: { state: desired } }
+    )
+  } catch (err) {
+    if (/Advanced Security|not available|HTTP 403|HTTP 422/i.test(err.message)) {
+      print(dry, 'skip-code-scanning', `${org}/${name}`, err.message.split('\n')[0].slice(0, 200))
+      return
+    }
+    throw err
+  }
+}
+
+async function reconcileOrgSecurity(org, security, dry) {
+  const patch = {}
+  if (security.advancedSecurity !== undefined) patch.advanced_security_enabled_for_new_repositories = !!security.advancedSecurity
+  if (security.secretScanning !== undefined) patch.secret_scanning_enabled_for_new_repositories = !!security.secretScanning
+  if (security.secretScanningPushProtection !== undefined) patch.secret_scanning_push_protection_enabled_for_new_repositories = !!security.secretScanningPushProtection
+  if (security.dependabotAlerts !== undefined) patch.dependabot_alerts_enabled_for_new_repositories = !!security.dependabotAlerts
+  if (security.dependabotSecurityUpdates !== undefined) patch.dependabot_security_updates_enabled_for_new_repositories = !!security.dependabotSecurityUpdates
+  if (!Object.keys(patch).length) return
+  print(dry, 'org-security', org, Object.keys(patch).join(', '))
+  if (!dry) await gh(['api', `orgs/${org}`, '--method', 'PATCH', '--input', '-'], { body: patch })
 }
 
 async function reconcileTopics(org, name, topics, dry) {

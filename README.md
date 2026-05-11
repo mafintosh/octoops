@@ -214,6 +214,43 @@ Example with mixin composition:
 }
 ```
 
+### GitHub Advanced Security
+
+Per-repo, under `security`:
+
+```json
+{
+  "name": "my-repo",
+  "security": {
+    "advancedSecurity": true,
+    "secretScanning": true,
+    "secretScanningPushProtection": true,
+    "secretScanningValidityChecks": true,
+    "dependabotSecurityUpdates": true,
+    "codeScanningDefaultSetup": true
+  }
+}
+```
+
+Maps to the repo's `security_and_analysis` settings; `codeScanningDefaultSetup` toggles the code-scanning default setup via its own endpoint. If GHAS isn't available on the plan/repo (private without GHAS, forks, etc.) the relevant calls log `skip-code-scanning` and continue.
+
+Org-level defaults for newly-created repos can be set at the top level:
+
+```json
+{
+  "org": "my-org",
+  "security": {
+    "advancedSecurity": true,
+    "secretScanning": true,
+    "secretScanningPushProtection": true,
+    "dependabotAlerts": true,
+    "dependabotSecurityUpdates": true
+  }
+}
+```
+
+These map to GitHub's `*_enabled_for_new_repositories` fields on the org settings — they only affect freshly-created repos; existing repos need the per-repo block.
+
 ### Environments
 
 Each entry in `environments` supports:
