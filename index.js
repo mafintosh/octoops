@@ -907,7 +907,21 @@ async function reconcileSettings(org, repo, dry) {
         body: patch
       })
     } catch (err) {
-      if (/Validation Failed|HTTP 422/i.test(err.message) && (patch.private !== undefined || patch.visibility !== undefined)) {
+      const is422 = /Validation Failed|HTTP 422/i.test(err.message)
+      const isAdvancedSecurityPublic = /Advanced security is always available for public repos/i.test(err.message)
+      if (is422 && isAdvancedSecurityPublic && patch.security_and_analysis && patch.security_and_analysis.advanced_security) {
+        const retry = { ...patch, security_and_analysis: { ...patch.security_and_analysis } }
+        delete retry.security_and_analysis.advanced_security
+        if (!Object.keys(retry.security_and_analysis).length) delete retry.security_and_analysis
+        if (Object.keys(retry).length) {
+          print(dry, 'update-retry', `${org}/${repo.name}`, 'advanced security always on for public repos — retrying without it')
+          await gh(['api', `repos/${org}/${repo.name}`, '--method', 'PATCH', '--input', '-'], {
+            body: retry
+          })
+        } else {
+          print(dry, 'skip-update', `${org}/${repo.name}`, 'advanced security always on for public repos and no other fields')
+        }
+      } else if (is422 && (patch.private !== undefined || patch.visibility !== undefined)) {
         const retry = { ...patch }
         delete retry.private
         delete retry.visibility
