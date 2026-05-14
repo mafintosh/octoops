@@ -658,7 +658,7 @@ function repoChanged(repo, prev) {
   if (prev.archived && !repo.archived) return true
   const settings = {}
   const prevSettings = {}
-  for (const k of ['description', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'security']) {
+  for (const k of ['description', 'homepage', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'security']) {
     if (repo[k] === undefined) continue
     settings[k] = repo[k]
     prevSettings[k] = prev[k]
@@ -741,7 +741,7 @@ async function reconcile(org, repo, prev, dry, done, opts) {
 
   const settings = {}
   const prevSettings = {}
-  for (const k of ['description', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'security']) {
+  for (const k of ['description', 'homepage', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'security']) {
     if (repo[k] === undefined) continue
     settings[k] = repo[k]
     prevSettings[k] = prev[k]
