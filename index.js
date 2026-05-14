@@ -855,6 +855,7 @@ async function reconcileSettings(org, repo, dry) {
   const patch = {}
 
   if (repo.description !== undefined) patch.description = repo.description
+  if (repo.homepage !== undefined) patch.homepage = repo.homepage
   if (repo.internal === true) patch.visibility = 'internal'
   else if (repo.private !== undefined) patch.private = repo.private
   if (repo.defaultBranch) patch.default_branch = repo.defaultBranch
