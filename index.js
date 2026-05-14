@@ -365,7 +365,7 @@ function seed(config, opts = {}) {
     if (existing.envSecrets) entry.envSecrets = existing.envSecrets
     if (repo.archived) entry.archived = true
     if (repo.description !== undefined) entry.description = repo.description
-    if (repo.homepage !== undefined) entry.description = repo.homepage
+    if (repo.homepage !== undefined) entry.homepage = repo.homepage
     if (repo.private !== undefined) entry.private = repo.private
     if (repo.internal !== undefined) entry.internal = repo.internal
     if (repo.defaultBranch) entry.defaultBranch = repo.defaultBranch
