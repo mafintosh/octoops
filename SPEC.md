@@ -13,6 +13,7 @@ reconciles actual state with desired state using `gh api` calls.
     {
       "name": "my-service",
       "description": "Does the thing",
+      "homepage": "https://my-service.io",
       "private": true,
       "topics": ["nodejs"],
       "teams": [

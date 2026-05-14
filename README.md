@@ -99,6 +99,7 @@ Each string element is looked up in `presets` (it can resolve to a single object
 Top-level repo fields for basic settings:
 
 - `description` — repo description
+- `homepage` — repo homepage url
 - `private: true|false` — visibility
 - `internal: true` — internal visibility (Enterprise only, overrides `private`)
 - `defaultBranch` — default branch name (e.g. `"main"`)
