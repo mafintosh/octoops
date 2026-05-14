@@ -128,6 +128,7 @@ async function importRepo(org, name) {
 
   if (repo.archived) entry.archived = true
   if (repo.description) entry.description = repo.description
+  if (repo.homepage) entry.homepage = repo.homepage
   if (repo.visibility === 'internal') entry.internal = true
   else entry.private = repo.private
 
@@ -364,6 +365,7 @@ function seed(config, opts = {}) {
     if (existing.envSecrets) entry.envSecrets = existing.envSecrets
     if (repo.archived) entry.archived = true
     if (repo.description !== undefined) entry.description = repo.description
+    if (repo.homepage !== undefined) entry.description = repo.homepage
     if (repo.private !== undefined) entry.private = repo.private
     if (repo.internal !== undefined) entry.internal = repo.internal
     if (repo.defaultBranch) entry.defaultBranch = repo.defaultBranch
@@ -708,8 +710,9 @@ async function reconcile(org, repo, prev, dry, done, opts) {
         await createRepo(org, repo)
         await new Promise((resolve) => setTimeout(resolve, 2000))
       }
-      // createRepo already sets description and visibility
+      // createRepo already sets description, homepage and visibility
       if (repo.description !== undefined) prev.description = repo.description
+      if (repo.homepage !== undefined) prev.homepage = repo.homepage
       if (repo.private !== undefined) prev.private = repo.private
       if (repo.internal !== undefined) prev.internal = repo.internal
       if (repo.init) done.initialized = true
@@ -748,6 +751,7 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     await reconcileSettings(org, repo, dry)
   }
   if (repo.description !== undefined) done.description = repo.description
+  if (repo.homepage !== undefined) done.homepage = repo.homepage
   if (repo.private !== undefined) done.private = repo.private
   if (repo.internal !== undefined) done.internal = repo.internal
   if (repo.defaultBranch) done.defaultBranch = repo.defaultBranch
@@ -1675,6 +1679,7 @@ async function createRepo(org, repo) {
     repo.internal === true ? '--internal' : repo.private === false ? '--public' : '--private'
   ]
   if (repo.description) args.push('--description', repo.description)
+  if (repo.homepage) args.push('--homepage', repo.homepage)
   if (repo.template) args.push('--template', repo.template)
   else if (repo.init) args.push('--add-readme')
   await gh(args)
