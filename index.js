@@ -992,15 +992,24 @@ async function reconcileTeams(org, name, desired, prev, dry) {
   for (const [slug, perm] of desiredMap) {
     if (prevMap.get(slug) === perm) continue
     print(dry, 'team', `${org}/${name}`, `${slug} -> ${perm}`)
-    if (!dry)
-      await gh([
-        'api',
-        `orgs/${org}/teams/${slug}/repos/${org}/${name}`,
-        '--method',
-        'PUT',
-        '-f',
-        `permission=${perm}`
-      ])
+    if (!dry) {
+      try {
+        await gh([
+          'api',
+          `orgs/${org}/teams/${slug}/repos/${org}/${name}`,
+          '--method',
+          'PUT',
+          '-f',
+          `permission=${perm}`
+        ])
+      } catch (err) {
+        if (/Validation Failed|HTTP 422/i.test(err.message)) {
+          print(dry, 'warn-team', `${org}/${name}`, `${slug} -> ${perm} rejected (unknown permission / custom role?)`)
+        } else {
+          throw err
+        }
+      }
+    }
   }
 
   for (const [slug] of prevMap) {
