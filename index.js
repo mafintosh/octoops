@@ -1843,8 +1843,10 @@ function run(cmd, args, opts = {}) {
 
     child.on('close', (code) => {
       if (opts.allowFailure) resolve({ code, stdout: out.trim(), stderr: err.trim() })
-      else if (code !== 0) reject(new Error(err.trim() || `${cmd} exited with code ${code}`))
-      else resolve(out.trim())
+      else if (code !== 0) {
+        const combined = [err.trim(), out.trim()].filter(Boolean).join(' | ')
+        reject(new Error(combined || `${cmd} exited with code ${code}`))
+      } else resolve(out.trim())
     })
 
     if (opts.body) {
