@@ -770,9 +770,10 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   if (repo.topics) done.topics = repo.topics
 
   if (current && (repo.teams || prev.teams) && changed(repo.teams, prev.teams)) {
-    await reconcileTeams(org, repo.name, repo.teams || [], prev.teams, dry)
+    done.teams = await reconcileTeams(org, repo.name, repo.teams || [], prev.teams, dry)
+  } else {
+    done.teams = repo.teams
   }
-  done.teams = repo.teams
 
   if (current && (repo.collaborators || prev.collaborators) && changed(repo.collaborators, prev.collaborators)) {
     await reconcileCollaborators(org, repo.name, repo.collaborators || [], prev.collaborators, dry)
@@ -983,8 +984,13 @@ async function reconcileTeams(org, name, desired, prev, dry) {
     desired.map((t) => [slugify(t.name), PERMISSIONS[t.permission] || t.permission])
   )
 
+  const appliedSlugs = new Set()
+
   for (const [slug, perm] of desiredMap) {
-    if (prevMap.get(slug) === perm) continue
+    if (prevMap.get(slug) === perm) {
+      appliedSlugs.add(slug)
+      continue
+    }
     print(dry, 'team', `${org}/${name}`, `${slug} -> ${perm}`)
     if (!dry) {
       try {
@@ -996,6 +1002,7 @@ async function reconcileTeams(org, name, desired, prev, dry) {
           '-f',
           `permission=${perm}`
         ])
+        appliedSlugs.add(slug)
       } catch (err) {
         if (/Validation Failed|HTTP 422/i.test(err.message)) {
           print(dry, 'warn-team', `${org}/${name}`, `${slug} -> ${perm} rejected (unknown permission / custom role?)`)
@@ -1003,6 +1010,8 @@ async function reconcileTeams(org, name, desired, prev, dry) {
           throw err
         }
       }
+    } else {
+      appliedSlugs.add(slug)
     }
   }
 
@@ -1017,6 +1026,8 @@ async function reconcileTeams(org, name, desired, prev, dry) {
       }
     }
   }
+
+  return desired.filter((t) => appliedSlugs.has(slugify(t.name)))
 }
 
 async function reconcileCollaborators(org, name, desired, prev, dry) {
