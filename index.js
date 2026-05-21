@@ -1543,7 +1543,7 @@ async function ensureNpmPackage(pkg, dry) {
 }
 
 async function reconcileNpm(org, repoName, npm, dry) {
-  const pkg = npm.package || repoName
+  const pkg = npm.package || npm.name || repoName
   const tp = npm.trustedPublishing
 
   if (!tp && !npm.maintainers) return true
