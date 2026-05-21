@@ -466,6 +466,26 @@ async function apply(config, opts = {}) {
       }
     }
 
+    if (config.runnerGroups || state.runnerGroups) {
+      const applied = await reconcileRunnerGroups(config.org, config.runnerGroups || {}, state.runnerGroups || {}, dry)
+      if (!dry) {
+        state.runnerGroups = applied
+        if (opts.statePath) saveState(opts.statePath, state)
+      }
+    }
+
+    if (config.hostedRunners || state.hostedRunners) {
+      const applied = await reconcileHostedRunners(config.org, config.hostedRunners || {}, state.hostedRunners || {}, dry)
+      if (!dry) {
+        state.hostedRunners = applied
+        if (opts.statePath) saveState(opts.statePath, state)
+      }
+    }
+
+    if (config.pruneOfflineRunners) {
+      await pruneOfflineRunners(config.org, dry)
+    }
+
     if (config.teams || state.teams) {
       if (Array.isArray(state.teams)) {
         const migrated = {}
@@ -967,6 +987,220 @@ async function reconcileOrgSecurity(org, security, dry) {
   if (!Object.keys(patch).length) return
   print(dry, 'org-security', org, Object.keys(patch).join(', '))
   if (!dry) await gh(['api', `orgs/${org}`, '--method', 'PATCH', '--input', '-'], { body: patch })
+}
+
+async function reconcileRunnerGroups(org, desired, prev, dry) {
+  const existing = await listRunnerGroups(org)
+  const byName = new Map(existing.map((g) => [g.name, g]))
+  const applied = {}
+
+  for (const name of Object.keys(desired)) {
+    const cfg = desired[name]
+    const want = normalizeRunnerGroup(cfg)
+    const current = byName.get(name)
+    const prevCfg = prev[name]
+
+    if (!current) {
+      print(dry, 'create-runner-group', org, name)
+      if (!dry) {
+        const body = await buildRunnerGroupBody(org, name, want)
+        const created = JSON.parse(await gh(['api', `orgs/${org}/actions/runner-groups`, '--method', 'POST', '--input', '-'], { body }))
+        if (want.visibility === 'selected' && want.repos) {
+          await setRunnerGroupRepos(org, created.id, want.repos, dry)
+        }
+      }
+    } else if (changed(want, prevCfg) || !runnerGroupMatches(current, want)) {
+      print(dry, 'update-runner-group', org, name)
+      if (!dry) {
+        const body = await buildRunnerGroupBody(org, name, want)
+        await gh(['api', `orgs/${org}/actions/runner-groups/${current.id}`, '--method', 'PATCH', '--input', '-'], { body })
+        if (want.visibility === 'selected' && want.repos) {
+          await setRunnerGroupRepos(org, current.id, want.repos, dry)
+        }
+      }
+    }
+
+    applied[name] = want
+  }
+
+  for (const name of Object.keys(prev)) {
+    if (name in desired) continue
+    const current = byName.get(name)
+    if (!current) continue
+    if (current.default) continue
+    print(dry, 'remove-runner-group', org, name)
+    if (!dry) {
+      try {
+        await gh(['api', `orgs/${org}/actions/runner-groups/${current.id}`, '--method', 'DELETE'])
+      } catch (err) {
+        if (!/Not Found/.test(err.message)) throw err
+      }
+    }
+  }
+
+  return applied
+}
+
+function normalizeRunnerGroup(cfg) {
+  const out = { visibility: cfg.visibility || 'all' }
+  if (cfg.allowsPublicRepositories !== undefined) out.allowsPublicRepositories = !!cfg.allowsPublicRepositories
+  if (cfg.restrictedToWorkflows) out.restrictedToWorkflows = cfg.restrictedToWorkflows
+  if (cfg.repos) out.repos = cfg.repos.slice().sort()
+  return out
+}
+
+async function buildRunnerGroupBody(org, name, cfg) {
+  const body = { name, visibility: cfg.visibility }
+  if (cfg.allowsPublicRepositories !== undefined) body.allows_public_repositories = cfg.allowsPublicRepositories
+  if (cfg.restrictedToWorkflows) {
+    body.restricted_to_workflows = true
+    body.selected_workflows = cfg.restrictedToWorkflows
+  }
+  return body
+}
+
+function runnerGroupMatches(current, want) {
+  if (current.visibility !== want.visibility) return false
+  if (want.allowsPublicRepositories !== undefined && current.allows_public_repositories !== want.allowsPublicRepositories) return false
+  if (want.restrictedToWorkflows) {
+    if (!current.restricted_to_workflows) return false
+    if (JSON.stringify((current.selected_workflows || []).sort()) !== JSON.stringify(want.restrictedToWorkflows.slice().sort())) return false
+  } else if (current.restricted_to_workflows) {
+    return false
+  }
+  return true
+}
+
+async function setRunnerGroupRepos(org, groupId, repoNames, dry) {
+  const ids = []
+  for (const name of repoNames) {
+    const repo = JSON.parse(await gh(['api', `repos/${org}/${name}`]))
+    ids.push(repo.id)
+  }
+  print(dry, 'runner-group-repos', org, repoNames.join(','))
+  if (!dry) {
+    await gh(['api', `orgs/${org}/actions/runner-groups/${groupId}/repositories`, '--method', 'PUT', '--input', '-'], {
+      body: { selected_repository_ids: ids }
+    })
+  }
+}
+
+async function listRunnerGroups(org) {
+  const data = JSON.parse(await gh(['api', `orgs/${org}/actions/runner-groups`, '--paginate']))
+  return data.runner_groups || []
+}
+
+async function reconcileHostedRunners(org, desired, prev, dry) {
+  const existing = await listHostedRunners(org)
+  const byName = new Map(existing.map((r) => [r.name, r]))
+  const applied = {}
+  let imageCatalog = null
+  let groupCatalog = null
+
+  for (const name of Object.keys(desired)) {
+    const cfg = desired[name]
+    const want = normalizeHostedRunner(cfg)
+    const current = byName.get(name)
+    const prevCfg = prev[name]
+
+    if (!current) {
+      print(dry, 'create-hosted-runner', org, name + ' (' + want.size + ', ' + want.image + ')')
+      if (!dry) {
+        if (!imageCatalog) imageCatalog = await listHostedRunnerImages(org)
+        if (!groupCatalog) groupCatalog = await listRunnerGroups(org)
+        const body = buildHostedRunnerBody(name, want, imageCatalog, groupCatalog)
+        await gh(['api', `orgs/${org}/actions/hosted-runners`, '--method', 'POST', '--input', '-'], { body })
+      }
+    } else if (changed(want, prevCfg) || !hostedRunnerMatches(current, want)) {
+      print(dry, 'update-hosted-runner', org, name)
+      if (!dry) {
+        if (!imageCatalog) imageCatalog = await listHostedRunnerImages(org)
+        if (!groupCatalog) groupCatalog = await listRunnerGroups(org)
+        const body = buildHostedRunnerBody(name, want, imageCatalog, groupCatalog)
+        delete body.name // name not updatable via PATCH
+        await gh(['api', `orgs/${org}/actions/hosted-runners/${current.id}`, '--method', 'PATCH', '--input', '-'], { body })
+      }
+    }
+
+    applied[name] = want
+  }
+
+  for (const name of Object.keys(prev)) {
+    if (name in desired) continue
+    const current = byName.get(name)
+    if (!current) continue
+    print(dry, 'remove-hosted-runner', org, name)
+    if (!dry) {
+      try {
+        await gh(['api', `orgs/${org}/actions/hosted-runners/${current.id}`, '--method', 'DELETE'])
+      } catch (err) {
+        if (!/Not Found/.test(err.message)) throw err
+      }
+    }
+  }
+
+  return applied
+}
+
+function normalizeHostedRunner(cfg) {
+  const out = { size: cfg.size, image: cfg.image, runnerGroup: cfg.runnerGroup }
+  if (cfg.maximumRunners !== undefined) out.maximumRunners = cfg.maximumRunners
+  if (cfg.enableStaticIp !== undefined) out.enableStaticIp = !!cfg.enableStaticIp
+  return out
+}
+
+function buildHostedRunnerBody(name, want, imageCatalog, groupCatalog) {
+  const image = imageCatalog.find((i) => i.id === want.image || i.display_name === want.image)
+  if (!image) throw new Error('unknown hosted runner image "' + want.image + '"')
+  const group = groupCatalog.find((g) => g.name === want.runnerGroup)
+  if (!group) throw new Error('unknown runner group "' + want.runnerGroup + '"')
+  const body = {
+    name,
+    image: { id: image.id, source: image.source },
+    size: want.size,
+    runner_group_id: group.id
+  }
+  if (want.maximumRunners !== undefined) body.maximum_runners = want.maximumRunners
+  if (want.enableStaticIp !== undefined) body.enable_static_ip = want.enableStaticIp
+  return body
+}
+
+function hostedRunnerMatches(current, want) {
+  if (current.size !== want.size) return false
+  if (current.image_details && current.image_details.id !== want.image && current.image_details.display_name !== want.image) return false
+  if (want.maximumRunners !== undefined && current.maximum_runners !== want.maximumRunners) return false
+  return true
+}
+
+async function listHostedRunners(org) {
+  try {
+    const data = JSON.parse(await gh(['api', `orgs/${org}/actions/hosted-runners`, '--paginate']))
+    return data.runners || []
+  } catch {
+    return []
+  }
+}
+
+async function listHostedRunnerImages(org) {
+  const github = JSON.parse(await gh(['api', `orgs/${org}/actions/hosted-runners/images/github-owned`]))
+  const partner = JSON.parse(await gh(['api', `orgs/${org}/actions/hosted-runners/images/partner`]))
+  return [...(github.images || []), ...(partner.images || [])]
+}
+
+async function pruneOfflineRunners(org, dry) {
+  const data = JSON.parse(await gh(['api', `orgs/${org}/actions/runners`, '--paginate']))
+  const runners = data.runners || []
+  for (const r of runners) {
+    if (r.status === 'online') continue
+    print(dry, 'remove-offline-runner', org, r.name + ' (' + r.status + ')')
+    if (!dry) {
+      try {
+        await gh(['api', `orgs/${org}/actions/runners/${r.id}`, '--method', 'DELETE'])
+      } catch (err) {
+        if (!/Not Found/.test(err.message)) throw err
+      }
+    }
+  }
 }
 
 async function reconcileTopics(org, name, topics, dry) {

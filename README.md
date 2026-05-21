@@ -252,6 +252,57 @@ Org-level defaults for newly-created repos can be set at the top level:
 
 These map to GitHub's `*_enabled_for_new_repositories` fields on the org settings — they only affect freshly-created repos; existing repos need the per-repo block.
 
+### Runners
+
+Manage self-hosted runner groups and GitHub-hosted larger runners at the org level. Octoops doesn't provision the underlying machines for self-hosted runners — those still register with GitHub the usual way — but it manages how they're grouped and which repos can use them.
+
+```json
+{
+  "org": "my-org",
+  "runnerGroups": {
+    "ci": {
+      "visibility": "selected",
+      "repos": ["api", "web"],
+      "allowsPublicRepositories": false,
+      "restrictedToWorkflows": ["my-org/ci/.github/workflows/*"]
+    },
+    "release": {
+      "visibility": "private"
+    }
+  },
+  "hostedRunners": {
+    "build-8core": {
+      "size": "8-core",
+      "image": "ubuntu-22.04",
+      "runnerGroup": "ci",
+      "maximumRunners": 3
+    }
+  },
+  "pruneOfflineRunners": true
+}
+```
+
+Runner group fields:
+
+- `visibility` — `"all"` | `"selected"` | `"private"`. Default `"all"`.
+- `repos` — when `visibility` is `"selected"`, the list of repo names that can use this group.
+- `allowsPublicRepositories: true|false` — whether public repos in the org can use this group.
+- `restrictedToWorkflows: ["my-org/repo/.github/workflows/*"]` — restrict to specific workflow refs.
+
+Hosted runner fields:
+
+- `size` — required, e.g. `"4-core"`, `"8-core"`, `"16-core"`. Match what your plan exposes.
+- `image` — required, image id or display name (e.g. `"ubuntu-22.04"`, `"windows-2022"`).
+- `runnerGroup` — required, name of a runner group (octoops resolves to id).
+- `maximumRunners` — optional cap on parallel runners.
+- `enableStaticIp: true` — optional static IP allocation.
+
+Other:
+
+- `pruneOfflineRunners: true` — remove offline/stale self-hosted runners at the org level on every apply.
+
+Groups and hosted runners in state but not in config are deleted. Default runner groups (`Default`) are never deleted even if they're not in config.
+
 ### Environments
 
 Each entry in `environments` supports:
