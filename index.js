@@ -1565,6 +1565,7 @@ async function reconcileNpm(org, repoName, npm, dry) {
     tp.workflow,
     '--repository',
     `${org}/${repoName}`,
+    '--allow-publish',
     '--yes'
   ]
   if (tp.environment) setArgs.push('--environment', tp.environment)
