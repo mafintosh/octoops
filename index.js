@@ -815,9 +815,10 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   }
 
   if (current && (repo.rulesets || prev.rulesets) && changed(repo.rulesets, prev.rulesets)) {
-    await reconcileRulesets(org, repo.name, repo.rulesets || [], prev.rulesets, dry)
+    done.rulesets = await reconcileRulesets(org, repo.name, repo.rulesets || [], prev.rulesets, dry)
+  } else {
+    done.rulesets = repo.rulesets
   }
-  done.rulesets = repo.rulesets
 
   if (repo.npm && changed(repo.npm, prev.npm)) {
     const npms = Array.isArray(repo.npm) ? repo.npm : [repo.npm]
@@ -1279,6 +1280,7 @@ async function reconcileEnvironment(org, repoName, env, dry) {
 async function reconcileRulesets(org, repoName, desired, prev, dry) {
   const desiredNames = new Set(desired.map((r) => r.name))
   const prevNames = (prev || []).filter((r) => !desiredNames.has(r.name))
+  const appliedNames = new Set()
 
   if (prevNames.length) {
     const current = await getRulesets(org, repoName)
@@ -1293,7 +1295,7 @@ async function reconcileRulesets(org, repoName, desired, prev, dry) {
         } catch (err) {
           if (rulesetUnavailable(err)) {
             print(dry, 'skip-ruleset', `${org}/${repoName}`, removed.name + ' (' + rulesetSkipReason(err) + ')')
-            return
+            continue
           }
           throw err
         }
@@ -1304,7 +1306,10 @@ async function reconcileRulesets(org, repoName, desired, prev, dry) {
   for (const ruleset of desired) {
     const body = await buildRulesetBody(org, ruleset)
     const prevRuleset = (prev || []).find((r) => r.name === ruleset.name)
-    if (prevRuleset && !changed(ruleset, prevRuleset)) continue
+    if (prevRuleset && !changed(ruleset, prevRuleset)) {
+      appliedNames.add(ruleset.name)
+      continue
+    }
 
     const current = await getRulesets(org, repoName)
     const existing = current.find((r) => r.name === ruleset.name)
@@ -1312,7 +1317,10 @@ async function reconcileRulesets(org, repoName, desired, prev, dry) {
     try {
       if (existing) {
         const full = JSON.parse(await gh(['api', `repos/${org}/${repoName}/rulesets/${existing.id}`]))
-        if (rulesetMatches(full, body)) continue
+        if (rulesetMatches(full, body)) {
+          appliedNames.add(ruleset.name)
+          continue
+        }
         print(dry, 'update-ruleset', `${org}/${repoName}`, ruleset.name)
         if (!dry)
           await gh(
@@ -1333,14 +1341,17 @@ async function reconcileRulesets(org, repoName, desired, prev, dry) {
             body
           })
       }
+      appliedNames.add(ruleset.name)
     } catch (err) {
       if (rulesetUnavailable(err)) {
         print(dry, 'skip-ruleset', `${org}/${repoName}`, ruleset.name + ' (' + rulesetSkipReason(err) + ')')
-        return
+        continue
       }
       throw err
     }
   }
+
+  return desired.filter((r) => appliedNames.has(r.name))
 }
 
 function rulesetUnavailable(err) {
