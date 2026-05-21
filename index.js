@@ -822,15 +822,9 @@ async function reconcile(org, repo, prev, dry, done, opts) {
 
   if (repo.npm && changed(repo.npm, prev.npm)) {
     const npms = Array.isArray(repo.npm) ? repo.npm : [repo.npm]
-    let allOk = true
-    for (const npm of npms) {
-      const ok = await reconcileNpm(org, repo.name, npm, dry)
-      if (!ok) allOk = false
-    }
-    if (allOk) done.npm = repo.npm
-  } else if (repo.npm) {
-    done.npm = repo.npm
+    for (const npm of npms) await reconcileNpm(org, repo.name, npm, dry)
   }
+  if (repo.npm) done.npm = repo.npm
 
   const configDir = opts.configPath ? path.dirname(opts.configPath) : null
 
