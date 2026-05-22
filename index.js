@@ -94,7 +94,7 @@ async function importOrgTeams(org, filterNames) {
   }
   const result = []
 
-  for (const team of teams) {
+  const teamsPromises = teams.map((team) => (async () => {
     await checkRateLimit()
     const entry = { name: team.name }
     if (team.description) entry.description = team.description
@@ -105,17 +105,19 @@ async function importOrgTeams(org, filterNames) {
 
     if (members.length) {
       entry.members = []
-      for (const m of members) {
+      const membersPromises = members.map((m) => (async () => {
         await checkRateLimit()
         const membership = await getOrgTeamMemberships(org, team.slug, m.login)
         if (membership) {
           entry.members.push({ username: m.login, role: membership.role })
         }
-      }
+      })())
+      await processQueue(membersPromises)
     }
 
     result.push(entry)
-  }
+  })())
+  await processQueue(teamsPromises)
 
   return result
 }
@@ -1853,5 +1855,34 @@ function run(cmd, args, opts = {}) {
       child.stdin.write(opts.rawBody)
     }
     child.stdin.end()
+  })
+}
+
+async function processQueue(promises, concurrency = 5) {
+  let index = 0
+  let active = 0
+
+  return new Promise((resolve, reject) => {
+    let done = 0
+    const results = []
+    function next() {
+      if (done === promises.length) {
+        resolve(results)
+        return
+      }
+      while (active < concurrency && index < promises.length) {
+        const current = index++
+        active++
+        promises[current]
+          .then((res) => results[current] = res)
+          .catch(reject)
+          .finally(() => {
+            active--
+            done++
+            next()
+          })
+      }
+    }
+    next()
   })
 }
