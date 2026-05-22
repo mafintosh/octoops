@@ -84,7 +84,7 @@ async function importOrgTeams(org, filterNames) {
     teams = []
     for (const name of filterNames) {
       try {
-        teams.push(await getOrgTeam(org, slugify(name)))
+        teams.push(await getOrgTeamOrThrow(org, slugify(name)))
       } catch (err) {
         if (!/Not Found/.test(err.message)) throw err
       }
@@ -1174,9 +1174,13 @@ async function getOrgTeams(org) {
   }
 }
 
+async function getOrgTeamOrThrow(org, slug) {
+  return JSON.parse(await gh(['api', `orgs/${org}/teams/${slug}`]))
+}
+
 async function getOrgTeam(org, slug) {
   try {
-    return JSON.parse(await gh(['api', `orgs/${org}/teams/${slug}`]))
+    return getOrgTeamOrThrow(org, slug)
   } catch {
     return null
   }
