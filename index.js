@@ -67,14 +67,14 @@ async function importOrg(org, opts = {}) {
     }
 
     config.repos = []
-    const reposPromises = repoNames.map((name, i) =>
+    const reposCallbacks = repoNames.map((name, i) =>
       (async () => {
         console.log(`importing ${name} (${i + 1}/${repoNames.length})...`)
         await checkRateLimit()
         config.repos.push(await importRepo(org, name))
-      })()
+      })
     )
-    await processQueue(reposPromises)
+    await processQueue(reposCallbacks)
   }
 
   return config
@@ -96,7 +96,7 @@ async function importOrgTeams(org, filterNames) {
   }
   const result = []
 
-  const teamsPromises = teams.map((team) =>
+  const teamsCallbacks = teams.map((team) =>
     (async () => {
       await checkRateLimit()
       const entry = { name: team.name }
@@ -108,22 +108,22 @@ async function importOrgTeams(org, filterNames) {
 
       if (members.length) {
         entry.members = []
-        const membersPromises = members.map((m) =>
+        const membersCallbacks = members.map((m) =>
           (async () => {
             await checkRateLimit()
             const membership = await getOrgTeamMemberships(org, team.slug, m.login)
             if (membership) {
               entry.members.push({ username: m.login, role: membership.role })
             }
-          })()
+          })
         )
-        await processQueue(membersPromises)
+        await processQueue(membersCallbacks)
       }
 
       result.push(entry)
-    })()
+    })
   )
-  await processQueue(teamsPromises)
+  await processQueue(teamsCallbacks)
 
   return result
 }
@@ -1864,7 +1864,7 @@ function run(cmd, args, opts = {}) {
   })
 }
 
-async function processQueue(promises, concurrency = 5) {
+async function processQueue(callbacks, concurrency = 5) {
   let index = 0
   let active = 0
 
@@ -1872,14 +1872,22 @@ async function processQueue(promises, concurrency = 5) {
     let done = 0
     const results = []
     function next() {
-      if (done === promises.length) {
+      if (done === callbacks.length) {
         resolve(results)
         return
       }
-      while (active < concurrency && index < promises.length) {
+      while (active < concurrency && index < callbacks.length) {
         const current = index++
         active++
-        promises[current]
+        // call the callback to get the promise
+        let promise
+        try {
+          promise = callbacks[current]()
+        } catch (err) {
+          reject(err)
+          return
+        }
+        Promise.resolve(promise)
           .then((res) => (results[current] = res))
           .catch(reject)
           .finally(() => {
