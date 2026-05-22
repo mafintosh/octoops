@@ -83,15 +83,14 @@ async function importOrgTeams(org, filterNames) {
   if (filterNames && filterNames.length) {
     teams = []
     for (const name of filterNames) {
-      const slug = slugify(name)
       try {
-        teams.push(JSON.parse(await gh(['api', `orgs/${org}/teams/${slug}`])))
+        teams.push(await getOrgTeam(org, slugify(name)))
       } catch (err) {
         if (!/Not Found/.test(err.message)) throw err
       }
     }
   } else {
-    teams = JSON.parse(await gh(['api', `orgs/${org}/teams`, '--paginate']))
+    teams = await getOrgTeams(org)
   }
   const result = []
 
@@ -102,17 +101,16 @@ async function importOrgTeams(org, filterNames) {
     if (team.privacy) entry.privacy = team.privacy
     if (team.parent) entry.parent = team.parent.name
 
-    const members = JSON.parse(
-      await gh(['api', `orgs/${org}/teams/${team.slug}/members`, '--paginate'])
-    )
+    const members = await getOrgTeamMembers(org, team.slug)
+
     if (members.length) {
       entry.members = []
       for (const m of members) {
         await checkRateLimit()
-        const membership = JSON.parse(
-          await gh(['api', `orgs/${org}/teams/${team.slug}/memberships/${m.login}`])
-        )
-        entry.members.push({ username: m.login, role: membership.role })
+        const membership = await getOrgTeamMemberships(org, team.slug, m.login)
+        if (membership) {
+          entry.members.push({ username: m.login, role: membership.role })
+        }
       }
     }
 
@@ -1168,6 +1166,14 @@ async function reconcileOrgTeam(org, team, prevTeam, dry) {
   }
 }
 
+async function getOrgTeams(org) {
+  try {
+    return JSON.parse(await gh(['api', `orgs/${org}/teams`]))
+  } catch {
+    return []
+  }
+}
+
 async function getOrgTeam(org, slug) {
   try {
     return JSON.parse(await gh(['api', `orgs/${org}/teams/${slug}`]))
@@ -1178,17 +1184,17 @@ async function getOrgTeam(org, slug) {
 
 async function getOrgTeamMembers(org, slug) {
   try {
-    const members = JSON.parse(await gh(['api', `orgs/${org}/teams/${slug}/members`, '--paginate']))
-    const result = []
-    for (const m of members) {
-      const membership = JSON.parse(
-        await gh(['api', `orgs/${org}/teams/${slug}/memberships/${m.login}`])
-      )
-      result.push({ login: m.login, role: membership.role })
-    }
-    return result
+    return JSON.parse(await gh(['api', `orgs/${org}/teams/${slug}/members`, '--paginate']))
   } catch {
     return []
+  }
+}
+
+async function getOrgTeamMemberships(org, slug, login) {
+  try {
+    return JSON.parse(await gh(['api', `orgs/${org}/teams/${slug}/memberships/${login}`]))
+  } catch {
+    return null
   }
 }
 
@@ -1690,14 +1696,6 @@ async function getRepo(org, name) {
     return JSON.parse(await gh(['api', `repos/${org}/${name}`]))
   } catch {
     return null
-  }
-}
-
-async function getTeams(org, name) {
-  try {
-    return JSON.parse(await gh(['api', `repos/${org}/${name}/teams`, '--paginate']))
-  } catch {
-    return []
   }
 }
 
