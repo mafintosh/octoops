@@ -1170,7 +1170,7 @@ async function reconcileOrgTeam(org, team, prevTeam, dry) {
 
 async function getOrgTeams(org) {
   try {
-    return JSON.parse(await gh(['api', `orgs/${org}/teams`]))
+    return JSON.parse(await gh(['api', `orgs/${org}/teams`, '--paginate']))
   } catch {
     return []
   }
