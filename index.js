@@ -67,13 +67,11 @@ async function importOrg(org, opts = {}) {
     }
 
     config.repos = []
-    const reposCallbacks = repoNames.map((name, i) =>
-      (async () => {
-        console.log(`importing ${name} (${i + 1}/${repoNames.length})...`)
-        await checkRateLimit()
-        config.repos.push(await importRepo(org, name))
-      })
-    )
+    const reposCallbacks = repoNames.map((name, i) => async () => {
+      console.log(`importing ${name} (${i + 1}/${repoNames.length})...`)
+      await checkRateLimit()
+      config.repos.push(await importRepo(org, name))
+    })
     await processQueue(reposCallbacks)
   }
 
@@ -96,33 +94,29 @@ async function importOrgTeams(org, filterNames) {
   }
   const result = []
 
-  const teamsCallbacks = teams.map((team) =>
-    (async () => {
-      await checkRateLimit()
-      const entry = { name: team.name }
-      if (team.description) entry.description = team.description
-      if (team.privacy) entry.privacy = team.privacy
-      if (team.parent) entry.parent = team.parent.name
+  const teamsCallbacks = teams.map((team) => async () => {
+    await checkRateLimit()
+    const entry = { name: team.name }
+    if (team.description) entry.description = team.description
+    if (team.privacy) entry.privacy = team.privacy
+    if (team.parent) entry.parent = team.parent.name
 
-      const members = await getOrgTeamMembers(org, team.slug)
+    const members = await getOrgTeamMembers(org, team.slug)
 
-      if (members.length) {
-        entry.members = []
-        const membersCallbacks = members.map((m) =>
-          (async () => {
-            await checkRateLimit()
-            const membership = await getOrgTeamMemberships(org, team.slug, m.login)
-            if (membership) {
-              entry.members.push({ username: m.login, role: membership.role })
-            }
-          })
-        )
-        await processQueue(membersCallbacks)
-      }
+    if (members.length) {
+      entry.members = []
+      const membersCallbacks = members.map((m) => async () => {
+        await checkRateLimit()
+        const membership = await getOrgTeamMemberships(org, team.slug, m.login)
+        if (membership) {
+          entry.members.push({ username: m.login, role: membership.role })
+        }
+      })
+      await processQueue(membersCallbacks)
+    }
 
-      result.push(entry)
-    })
-  )
+    result.push(entry)
+  })
   await processQueue(teamsCallbacks)
 
   return result
