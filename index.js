@@ -94,7 +94,7 @@ async function importOrgTeams(org, filterNames) {
   }
   const result = []
 
-  const teamsCallbacks = teams.map((team) => async () => {
+  for (const team of teams) {
     await checkRateLimit()
     const entry = { name: team.name }
     if (team.description) entry.description = team.description
@@ -105,19 +105,17 @@ async function importOrgTeams(org, filterNames) {
 
     if (members.length) {
       entry.members = []
-      const membersCallbacks = members.map((m) => async () => {
+      for (const m of members) {
         await checkRateLimit()
         const membership = await getOrgTeamMemberships(org, team.slug, m.login)
         if (membership) {
           entry.members.push({ username: m.login, role: membership.role })
         }
-      })
-      await processQueue(membersCallbacks)
+      }
     }
 
     result.push(entry)
-  })
-  await processQueue(teamsCallbacks)
+  }
 
   return result
 }
@@ -1855,42 +1853,5 @@ function run(cmd, args, opts = {}) {
       child.stdin.write(opts.rawBody)
     }
     child.stdin.end()
-  })
-}
-
-async function processQueue(callbacks, concurrency = 5) {
-  let index = 0
-  let active = 0
-
-  return new Promise((resolve, reject) => {
-    let done = 0
-    const results = []
-    function next() {
-      if (done === callbacks.length) {
-        resolve(results)
-        return
-      }
-      while (active < concurrency && index < callbacks.length) {
-        const current = index++
-        active++
-        // call the callback to get the promise
-        let promise
-        try {
-          promise = callbacks[current]()
-        } catch (err) {
-          reject(err)
-          return
-        }
-        Promise.resolve(promise)
-          .then((res) => (results[current] = res))
-          .catch(reject)
-          .finally(() => {
-            active--
-            done++
-            next()
-          })
-      }
-    }
-    next()
   })
 }
