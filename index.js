@@ -770,9 +770,10 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   if (repo.topics) done.topics = repo.topics
 
   if (current && (repo.teams || prev.teams) && changed(repo.teams, prev.teams)) {
-    await reconcileTeams(org, repo.name, repo.teams || [], prev.teams, dry)
+    done.teams = await reconcileTeams(org, repo.name, repo.teams || [], prev.teams, dry)
+  } else {
+    done.teams = repo.teams
   }
-  done.teams = repo.teams
 
   if (current && (repo.collaborators || prev.collaborators) && changed(repo.collaborators, prev.collaborators)) {
     await reconcileCollaborators(org, repo.name, repo.collaborators || [], prev.collaborators, dry)
@@ -822,15 +823,9 @@ async function reconcile(org, repo, prev, dry, done, opts) {
 
   if (repo.npm && changed(repo.npm, prev.npm)) {
     const npms = Array.isArray(repo.npm) ? repo.npm : [repo.npm]
-    let allOk = true
-    for (const npm of npms) {
-      const ok = await reconcileNpm(org, repo.name, npm, dry)
-      if (!ok) allOk = false
-    }
-    if (allOk) done.npm = repo.npm
-  } else if (repo.npm) {
-    done.npm = repo.npm
+    for (const npm of npms) await reconcileNpm(org, repo.name, npm, dry)
   }
+  if (repo.npm) done.npm = repo.npm
 
   const configDir = opts.configPath ? path.dirname(opts.configPath) : null
 
@@ -989,18 +984,35 @@ async function reconcileTeams(org, name, desired, prev, dry) {
     desired.map((t) => [slugify(t.name), PERMISSIONS[t.permission] || t.permission])
   )
 
+  const appliedSlugs = new Set()
+
   for (const [slug, perm] of desiredMap) {
-    if (prevMap.get(slug) === perm) continue
+    if (prevMap.get(slug) === perm) {
+      appliedSlugs.add(slug)
+      continue
+    }
     print(dry, 'team', `${org}/${name}`, `${slug} -> ${perm}`)
-    if (!dry)
-      await gh([
-        'api',
-        `orgs/${org}/teams/${slug}/repos/${org}/${name}`,
-        '--method',
-        'PUT',
-        '-f',
-        `permission=${perm}`
-      ])
+    if (!dry) {
+      try {
+        await gh([
+          'api',
+          `orgs/${org}/teams/${slug}/repos/${org}/${name}`,
+          '--method',
+          'PUT',
+          '-f',
+          `permission=${perm}`
+        ])
+        appliedSlugs.add(slug)
+      } catch (err) {
+        if (/Validation Failed|HTTP 422/i.test(err.message)) {
+          print(dry, 'warn-team', `${org}/${name}`, `${slug} -> ${perm} rejected (unknown permission / custom role?)`)
+        } else {
+          throw err
+        }
+      }
+    } else {
+      appliedSlugs.add(slug)
+    }
   }
 
   for (const [slug] of prevMap) {
@@ -1014,6 +1026,8 @@ async function reconcileTeams(org, name, desired, prev, dry) {
       }
     }
   }
+
+  return desired.filter((t) => appliedSlugs.has(slugify(t.name)))
 }
 
 async function reconcileCollaborators(org, name, desired, prev, dry) {
@@ -1534,7 +1548,7 @@ async function ensureNpmPackage(pkg, dry) {
 }
 
 async function reconcileNpm(org, repoName, npm, dry) {
-  const pkg = npm.package || repoName
+  const pkg = npm.package || npm.name || repoName
   const tp = npm.trustedPublishing
 
   if (!tp && !npm.maintainers) return true
@@ -1556,6 +1570,7 @@ async function reconcileNpm(org, repoName, npm, dry) {
     tp.workflow,
     '--repository',
     `${org}/${repoName}`,
+    '--allow-publish',
     '--yes'
   ]
   if (tp.environment) setArgs.push('--environment', tp.environment)
