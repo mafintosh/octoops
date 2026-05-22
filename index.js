@@ -280,16 +280,28 @@ async function importRepo(org, name) {
   return entry
 }
 
-async function checkRateLimit() {
-  const data = JSON.parse(await gh(['api', 'rate_limit']))
-  const core = data.resources.core
-  if (core.remaining > 100) return
-  const reset = core.reset * 1000
-  const wait = reset - Date.now() + 1000
-  if (wait <= 0) return
-  console.log(`rate limit low (${core.remaining} remaining), waiting ${Math.ceil(wait / 1000)}s...`)
-  await new Promise((resolve) => setTimeout(resolve, wait))
-}
+const checkRateLimit = (() => {
+  const THRESHOLD = 100
+  let remaining = 0
+  let callsSinceLastCheck = 0
+
+  return async function() {
+    callsSinceLastCheck++
+    const betweenChecks = remaining > THRESHOLD ? 20 : 1
+    if (callsSinceLastCheck < betweenChecks) return
+
+    const data = JSON.parse(await gh(['api', 'rate_limit']))
+    const core = data.resources.core
+    remaining = core.remaining
+    callsSinceLastCheck = 0
+    if (core.remaining > THRESHOLD) return
+    const reset = core.reset * 1000
+    const wait = reset - Date.now() + 1000
+    if (wait <= 0) return
+    console.log(`rate limit low (${core.remaining} remaining), waiting ${Math.ceil(wait / 1000)}s...`)
+    await new Promise((resolve) => setTimeout(resolve, wait))
+  }
+})()
 
 let auditStream = null
 
