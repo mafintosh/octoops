@@ -83,15 +83,14 @@ async function importOrgTeams(org, filterNames) {
   if (filterNames && filterNames.length) {
     teams = []
     for (const name of filterNames) {
-      const slug = slugify(name)
       try {
-        teams.push(JSON.parse(await gh(['api', `orgs/${org}/teams/${slug}`])))
+        teams.push(await getOrgTeamOrThrow(org, slugify(name)))
       } catch (err) {
         if (!/Not Found/.test(err.message)) throw err
       }
     }
   } else {
-    teams = JSON.parse(await gh(['api', `orgs/${org}/teams`, '--paginate']))
+    teams = await getOrgTeams(org)
   }
   const result = []
 
@@ -102,17 +101,16 @@ async function importOrgTeams(org, filterNames) {
     if (team.privacy) entry.privacy = team.privacy
     if (team.parent) entry.parent = team.parent.name
 
-    const members = JSON.parse(
-      await gh(['api', `orgs/${org}/teams/${team.slug}/members`, '--paginate'])
-    )
+    const members = await getOrgTeamMembers(org, team.slug)
+
     if (members.length) {
       entry.members = []
       for (const m of members) {
         await checkRateLimit()
-        const membership = JSON.parse(
-          await gh(['api', `orgs/${org}/teams/${team.slug}/memberships/${m.login}`])
-        )
-        entry.members.push({ username: m.login, role: membership.role })
+        const membership = await getOrgTeamMemberships(org, team.slug, m.login)
+        if (membership) {
+          entry.members.push({ username: m.login, role: membership.role })
+        }
       }
     }
 
@@ -658,7 +656,7 @@ function repoChanged(repo, prev) {
   if (prev.archived && !repo.archived) return true
   const settings = {}
   const prevSettings = {}
-  for (const k of ['description', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'security']) {
+  for (const k of ['description', 'homepage', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'security']) {
     if (repo[k] === undefined) continue
     settings[k] = repo[k]
     prevSettings[k] = prev[k]
@@ -741,7 +739,7 @@ async function reconcile(org, repo, prev, dry, done, opts) {
 
   const settings = {}
   const prevSettings = {}
-  for (const k of ['description', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'security']) {
+  for (const k of ['description', 'homepage', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'security']) {
     if (repo[k] === undefined) continue
     settings[k] = repo[k]
     prevSettings[k] = prev[k]
@@ -770,9 +768,10 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   if (repo.topics) done.topics = repo.topics
 
   if (current && (repo.teams || prev.teams) && changed(repo.teams, prev.teams)) {
-    await reconcileTeams(org, repo.name, repo.teams || [], prev.teams, dry)
+    done.teams = await reconcileTeams(org, repo.name, repo.teams || [], prev.teams, dry)
+  } else {
+    done.teams = repo.teams
   }
-  done.teams = repo.teams
 
   if (current && (repo.collaborators || prev.collaborators) && changed(repo.collaborators, prev.collaborators)) {
     await reconcileCollaborators(org, repo.name, repo.collaborators || [], prev.collaborators, dry)
@@ -822,15 +821,9 @@ async function reconcile(org, repo, prev, dry, done, opts) {
 
   if (repo.npm && changed(repo.npm, prev.npm)) {
     const npms = Array.isArray(repo.npm) ? repo.npm : [repo.npm]
-    let allOk = true
-    for (const npm of npms) {
-      const ok = await reconcileNpm(org, repo.name, npm, dry)
-      if (!ok) allOk = false
-    }
-    if (allOk) done.npm = repo.npm
-  } else if (repo.npm) {
-    done.npm = repo.npm
+    for (const npm of npms) await reconcileNpm(org, repo.name, npm, dry)
   }
+  if (repo.npm) done.npm = repo.npm
 
   const configDir = opts.configPath ? path.dirname(opts.configPath) : null
 
@@ -907,7 +900,21 @@ async function reconcileSettings(org, repo, dry) {
         body: patch
       })
     } catch (err) {
-      if (/Validation Failed|HTTP 422/i.test(err.message) && (patch.private !== undefined || patch.visibility !== undefined)) {
+      const is422 = /Validation Failed|HTTP 422/i.test(err.message)
+      const isAdvancedSecurityPublic = /Advanced security is always available for public repos/i.test(err.message)
+      if (is422 && isAdvancedSecurityPublic && patch.security_and_analysis && patch.security_and_analysis.advanced_security) {
+        const retry = { ...patch, security_and_analysis: { ...patch.security_and_analysis } }
+        delete retry.security_and_analysis.advanced_security
+        if (!Object.keys(retry.security_and_analysis).length) delete retry.security_and_analysis
+        if (Object.keys(retry).length) {
+          print(dry, 'update-retry', `${org}/${repo.name}`, 'advanced security always on for public repos — retrying without it')
+          await gh(['api', `repos/${org}/${repo.name}`, '--method', 'PATCH', '--input', '-'], {
+            body: retry
+          })
+        } else {
+          print(dry, 'skip-update', `${org}/${repo.name}`, 'advanced security always on for public repos and no other fields')
+        }
+      } else if (is422 && (patch.private !== undefined || patch.visibility !== undefined)) {
         const retry = { ...patch }
         delete retry.private
         delete retry.visibility
@@ -975,18 +982,35 @@ async function reconcileTeams(org, name, desired, prev, dry) {
     desired.map((t) => [slugify(t.name), PERMISSIONS[t.permission] || t.permission])
   )
 
+  const appliedSlugs = new Set()
+
   for (const [slug, perm] of desiredMap) {
-    if (prevMap.get(slug) === perm) continue
+    if (prevMap.get(slug) === perm) {
+      appliedSlugs.add(slug)
+      continue
+    }
     print(dry, 'team', `${org}/${name}`, `${slug} -> ${perm}`)
-    if (!dry)
-      await gh([
-        'api',
-        `orgs/${org}/teams/${slug}/repos/${org}/${name}`,
-        '--method',
-        'PUT',
-        '-f',
-        `permission=${perm}`
-      ])
+    if (!dry) {
+      try {
+        await gh([
+          'api',
+          `orgs/${org}/teams/${slug}/repos/${org}/${name}`,
+          '--method',
+          'PUT',
+          '-f',
+          `permission=${perm}`
+        ])
+        appliedSlugs.add(slug)
+      } catch (err) {
+        if (/Validation Failed|HTTP 422/i.test(err.message)) {
+          print(dry, 'warn-team', `${org}/${name}`, `${slug} -> ${perm} rejected (unknown permission / custom role?)`)
+        } else {
+          throw err
+        }
+      }
+    } else {
+      appliedSlugs.add(slug)
+    }
   }
 
   for (const [slug] of prevMap) {
@@ -1000,6 +1024,8 @@ async function reconcileTeams(org, name, desired, prev, dry) {
       }
     }
   }
+
+  return desired.filter((t) => appliedSlugs.has(slugify(t.name)))
 }
 
 async function reconcileCollaborators(org, name, desired, prev, dry) {
@@ -1140,9 +1166,21 @@ async function reconcileOrgTeam(org, team, prevTeam, dry) {
   }
 }
 
+async function getOrgTeams(org) {
+  try {
+    return JSON.parse(await gh(['api', `orgs/${org}/teams`, '--paginate']))
+  } catch {
+    return []
+  }
+}
+
+async function getOrgTeamOrThrow(org, slug) {
+  return JSON.parse(await gh(['api', `orgs/${org}/teams/${slug}`]))
+}
+
 async function getOrgTeam(org, slug) {
   try {
-    return JSON.parse(await gh(['api', `orgs/${org}/teams/${slug}`]))
+    return getOrgTeamOrThrow(org, slug)
   } catch {
     return null
   }
@@ -1150,17 +1188,17 @@ async function getOrgTeam(org, slug) {
 
 async function getOrgTeamMembers(org, slug) {
   try {
-    const members = JSON.parse(await gh(['api', `orgs/${org}/teams/${slug}/members`, '--paginate']))
-    const result = []
-    for (const m of members) {
-      const membership = JSON.parse(
-        await gh(['api', `orgs/${org}/teams/${slug}/memberships/${m.login}`])
-      )
-      result.push({ login: m.login, role: membership.role })
-    }
-    return result
+    return JSON.parse(await gh(['api', `orgs/${org}/teams/${slug}/members`, '--paginate']))
   } catch {
     return []
+  }
+}
+
+async function getOrgTeamMemberships(org, slug, login) {
+  try {
+    return JSON.parse(await gh(['api', `orgs/${org}/teams/${slug}/memberships/${login}`]))
+  } catch {
+    return null
   }
 }
 
@@ -1520,7 +1558,7 @@ async function ensureNpmPackage(pkg, dry) {
 }
 
 async function reconcileNpm(org, repoName, npm, dry) {
-  const pkg = npm.package || repoName
+  const pkg = npm.package || npm.name || repoName
   const tp = npm.trustedPublishing
 
   if (!tp && !npm.maintainers) return true
@@ -1542,6 +1580,7 @@ async function reconcileNpm(org, repoName, npm, dry) {
     tp.workflow,
     '--repository',
     `${org}/${repoName}`,
+    '--allow-publish',
     '--yes'
   ]
   if (tp.environment) setArgs.push('--environment', tp.environment)
@@ -1661,14 +1700,6 @@ async function getRepo(org, name) {
     return JSON.parse(await gh(['api', `repos/${org}/${name}`]))
   } catch {
     return null
-  }
-}
-
-async function getTeams(org, name) {
-  try {
-    return JSON.parse(await gh(['api', `repos/${org}/${name}/teams`, '--paginate']))
-  } catch {
-    return []
   }
 }
 
