@@ -67,12 +67,12 @@ async function importOrg(org, opts = {}) {
     }
 
     config.repos = []
-    const reposCallbacks = repoNames.map((name, i) => async () => {
+    for (let i = 0; i < repoNames.length; i++) {
+      const name = repoNames[i]
       console.log(`importing ${name} (${i + 1}/${repoNames.length})...`)
       await checkRateLimit()
       config.repos.push(await importRepo(org, name))
-    })
-    await processQueue(reposCallbacks)
+    }
   }
 
   return config
