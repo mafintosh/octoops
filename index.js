@@ -67,11 +67,13 @@ async function importOrg(org, opts = {}) {
     }
 
     config.repos = []
-    const reposPromises = repoNames.map((name, i) => (async () => {
-      console.log(`importing ${name} (${i + 1}/${repoNames.length})...`)
-      await checkRateLimit()
-      config.repos.push(await importRepo(org, name))
-    })())
+    const reposPromises = repoNames.map((name, i) =>
+      (async () => {
+        console.log(`importing ${name} (${i + 1}/${repoNames.length})...`)
+        await checkRateLimit()
+        config.repos.push(await importRepo(org, name))
+      })()
+    )
     await processQueue(reposPromises)
   }
 
@@ -94,29 +96,33 @@ async function importOrgTeams(org, filterNames) {
   }
   const result = []
 
-  const teamsPromises = teams.map((team) => (async () => {
-    await checkRateLimit()
-    const entry = { name: team.name }
-    if (team.description) entry.description = team.description
-    if (team.privacy) entry.privacy = team.privacy
-    if (team.parent) entry.parent = team.parent.name
+  const teamsPromises = teams.map((team) =>
+    (async () => {
+      await checkRateLimit()
+      const entry = { name: team.name }
+      if (team.description) entry.description = team.description
+      if (team.privacy) entry.privacy = team.privacy
+      if (team.parent) entry.parent = team.parent.name
 
-    const members = await getOrgTeamMembers(org, team.slug)
+      const members = await getOrgTeamMembers(org, team.slug)
 
-    if (members.length) {
-      entry.members = []
-      const membersPromises = members.map((m) => (async () => {
-        await checkRateLimit()
-        const membership = await getOrgTeamMemberships(org, team.slug, m.login)
-        if (membership) {
-          entry.members.push({ username: m.login, role: membership.role })
-        }
-      })())
-      await processQueue(membersPromises)
-    }
+      if (members.length) {
+        entry.members = []
+        const membersPromises = members.map((m) =>
+          (async () => {
+            await checkRateLimit()
+            const membership = await getOrgTeamMemberships(org, team.slug, m.login)
+            if (membership) {
+              entry.members.push({ username: m.login, role: membership.role })
+            }
+          })()
+        )
+        await processQueue(membersPromises)
+      }
 
-    result.push(entry)
-  })())
+      result.push(entry)
+    })()
+  )
   await processQueue(teamsPromises)
 
   return result
@@ -1874,7 +1880,7 @@ async function processQueue(promises, concurrency = 5) {
         const current = index++
         active++
         promises[current]
-          .then((res) => results[current] = res)
+          .then((res) => (results[current] = res))
           .catch(reject)
           .finally(() => {
             active--
