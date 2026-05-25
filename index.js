@@ -1793,7 +1793,7 @@ async function ensureNpmPackage(pkg, dry) {
 }
 
 async function reconcileNpm(org, repoName, npm, dry) {
-  const pkg = npm.package || npm.name || repoName
+  const pkg = npm.package || npm.name || (npm.scope ? (npm.scope.startsWith('@') ? npm.scope : '@' + npm.scope) + '/' + repoName : repoName)
   const tp = npm.trustedPublishing
 
   if (!tp && !npm.maintainers) return true
