@@ -563,7 +563,15 @@ Only direct collaborators are managed. Org-level implicit access is ignored. Unl
 }
 ```
 
-Sets up npm trusted publishing so GitHub Actions can publish via OIDC without npm tokens. If the package doesn't exist on npm yet, a placeholder 0.0.0 is published first. `package` defaults to the repo name if omitted. Requires interactive npm authentication on first run.
+Sets up npm trusted publishing so GitHub Actions can publish via OIDC without npm tokens. If the package doesn't exist on npm yet, a placeholder 0.0.0 is published first. `package` defaults to the repo name if omitted, or to `<scope>/<repo-name>` if `scope` is set. Requires interactive npm authentication on first run.
+
+```json
+{
+  "npm": { "scope": "@my-org", "trustedPublishing": { "workflow": "publish.yml", "environment": "npm" } }
+}
+```
+
+…makes the package name default to `@my-org/<repo-name>`. The leading `@` is optional; octoops adds it if missing. Defining `package` explicitly overrides `scope`.
 
 For repos that publish multiple packages, use an array:
 
