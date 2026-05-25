@@ -102,17 +102,11 @@ async function importOrgTeams(org, filterNames) {
     if (team.privacy) entry.privacy = team.privacy
     if (team.parent) entry.parent = team.parent.name
 
-    const members = JSON.parse(
-      await gh(['api', `orgs/${org}/teams/${team.slug}/members`, '--paginate'])
-    )
+    const members = await getDirectTeamMembers(org, team.slug)
     if (members.length) {
       entry.members = []
       for (const m of members) {
-        await checkRateLimit()
-        const membership = JSON.parse(
-          await gh(['api', `orgs/${org}/teams/${team.slug}/memberships/${m.login}`])
-        )
-        entry.members.push({ username: m.login, role: membership.role })
+        entry.members.push({ username: m.login, role: m.role })
       }
     }
 
@@ -1413,18 +1407,30 @@ async function getOrgTeam(org, slug) {
 
 async function getOrgTeamMembers(org, slug) {
   try {
-    const members = JSON.parse(await gh(['api', `orgs/${org}/teams/${slug}/members`, '--paginate']))
-    const result = []
-    for (const m of members) {
-      const membership = JSON.parse(
-        await gh(['api', `orgs/${org}/teams/${slug}/memberships/${m.login}`])
-      )
-      result.push({ login: m.login, role: membership.role })
-    }
-    return result
+    return await getDirectTeamMembers(org, slug)
   } catch {
     return []
   }
+}
+
+async function getDirectTeamMembers(org, slug) {
+  const query = 'query($org: String!, $slug: String!, $cursor: String) { organization(login: $org) { team(slug: $slug) { members(membership: IMMEDIATE, first: 100, after: $cursor) { edges { role node { login } } pageInfo { hasNextPage endCursor } } } } }'
+  const result = []
+  let cursor = null
+  while (true) {
+    const args = ['api', 'graphql', '-f', `query=${query}`, '-F', `org=${org}`, '-F', `slug=${slug}`]
+    if (cursor) args.push('-F', `cursor=${cursor}`)
+    const out = await gh(args)
+    const data = JSON.parse(out)
+    const team = data && data.data && data.data.organization && data.data.organization.team
+    if (!team) return result
+    for (const edge of team.members.edges) {
+      result.push({ login: edge.node.login, role: (edge.role || 'member').toLowerCase() })
+    }
+    if (!team.members.pageInfo.hasNextPage) break
+    cursor = team.members.pageInfo.endCursor
+  }
+  return result
 }
 
 async function reconcileBranchProtection(org, name, rule, dry) {
