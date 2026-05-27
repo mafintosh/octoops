@@ -1410,7 +1410,7 @@ async function getOrgTeamOrThrow(org, slug) {
 
 async function getOrgTeam(org, slug) {
   try {
-    return getOrgTeamOrThrow(org, slug)
+    return await getOrgTeamOrThrow(org, slug)
   } catch {
     return null
   }
