@@ -481,6 +481,14 @@ async function apply(config, opts = {}) {
       await pruneOfflineRunners(config.org, dry)
     }
 
+    if (config.githubPackages && changed(config.githubPackages, state.githubPackages)) {
+      await reconcileGithubPackages(config.org, config.githubPackages, dry)
+      if (!dry) {
+        state.githubPackages = config.githubPackages
+        if (opts.statePath) saveState(opts.statePath, state)
+      }
+    }
+
     if (config.teams || state.teams) {
       if (Array.isArray(state.teams)) {
         const migrated = {}
@@ -1180,6 +1188,35 @@ async function listHostedRunnerImages(org) {
   const github = JSON.parse(await gh(['api', `orgs/${org}/actions/hosted-runners/images/github-owned`]))
   const partner = JSON.parse(await gh(['api', `orgs/${org}/actions/hosted-runners/images/partner`]))
   return [...(github.images || []), ...(partner.images || [])]
+}
+
+async function reconcileGithubPackages(org, desired, dry) {
+  for (const entry of desired) {
+    const type = entry.type || 'npm'
+    const name = entry.name
+    if (!name) throw new Error('githubPackages entry missing name')
+    if (!entry.visibility) throw new Error('githubPackages entry "' + name + '" missing visibility')
+    if (!['public', 'private', 'internal'].includes(entry.visibility)) {
+      throw new Error('githubPackages entry "' + name + '" has invalid visibility: ' + entry.visibility)
+    }
+    const encoded = encodeURIComponent(name)
+    let current
+    try {
+      current = JSON.parse(await gh(['api', `orgs/${org}/packages/${type}/${encoded}`]))
+    } catch (err) {
+      if (/Not Found|HTTP 404/i.test(err.message)) {
+        throw new Error('package ' + name + ' (' + type + ') not published on GitHub Packages for org ' + org + ' — publish it before setting visibility')
+      }
+      throw err
+    }
+    if (current.visibility === entry.visibility) continue
+    print(dry, 'package-visibility', `${org}/${name}`, current.visibility + ' -> ' + entry.visibility)
+    if (!dry) {
+      await gh(['api', `orgs/${org}/packages/${type}/${encoded}`, '--method', 'PATCH', '--input', '-'], {
+        body: { visibility: entry.visibility }
+      })
+    }
+  }
 }
 
 async function pruneOfflineRunners(org, dry) {

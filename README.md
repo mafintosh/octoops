@@ -252,6 +252,32 @@ Org-level defaults for newly-created repos can be set at the top level:
 
 These map to GitHub's `*_enabled_for_new_repositories` fields on the org settings — they only affect freshly-created repos; existing repos need the per-repo block.
 
+### GitHub Packages visibility
+
+Set the visibility of an org's GitHub Packages by package name:
+
+```json
+{
+  "org": "my-org",
+  "githubPackages": [
+    { "name": "@my-org/foo", "visibility": "private" },
+    { "name": "my-tool", "visibility": "public" }
+  ]
+}
+```
+
+Fields:
+
+- `name` — required, the package name (with `@scope/` prefix if scoped).
+- `visibility` — required, one of `"public"` | `"private"` | `"internal"`.
+- `type` — optional, defaults to `"npm"`. Other types (e.g. `"container"`) work the same way via the same API.
+
+Behavior:
+
+- Apply errors if the package isn't published yet on GitHub Packages — publish it first (e.g. via your trusted-publishing workflow), then octoops can set visibility.
+- No-op when current visibility already matches.
+- Tracked in state; removing an entry from config leaves the package's visibility untouched (octoops won't flip it back).
+
 ### Runners
 
 Manage self-hosted runner groups and GitHub-hosted larger runners at the org level. Octoops doesn't provision the underlying machines for self-hosted runners — those still register with GitHub the usual way — but it manages how they're grouped and which repos can use them.
