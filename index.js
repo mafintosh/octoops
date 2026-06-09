@@ -797,9 +797,10 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   }
 
   if (current && (repo.collaborators || prev.collaborators) && changed(repo.collaborators, prev.collaborators)) {
-    await reconcileCollaborators(org, repo.name, repo.collaborators || [], prev.collaborators, dry)
+    done.collaborators = await reconcileCollaborators(org, repo.name, repo.collaborators || [], prev.collaborators, dry)
+  } else {
+    done.collaborators = repo.collaborators
   }
-  done.collaborators = repo.collaborators
 
   if (changed(repo.branchProtection, prev.branchProtection)) {
     for (const rule of repo.branchProtection || []) {
@@ -1301,29 +1302,53 @@ async function reconcileCollaborators(org, name, desired, prev, dry) {
     desired.map((c) => [c.username, PERMISSIONS[c.permission] || c.permission])
   )
 
+  const appliedUsernames = new Set()
+
   for (const [username, perm] of desiredMap) {
-    if (prevMap.get(username) === perm) continue
+    if (prevMap.get(username) === perm) {
+      appliedUsernames.add(username)
+      continue
+    }
     print(dry, 'collaborator', `${org}/${name}`, `${username} -> ${perm}`)
-    if (!dry)
-      await gh(
-        [
-          'api',
-          `repos/${org}/${name}/collaborators/${username}`,
-          '--method',
-          'PUT',
-          '--input',
-          '-'
-        ],
-        { body: { permission: perm } }
-      )
+    if (!dry) {
+      try {
+        await gh(
+          [
+            'api',
+            `repos/${org}/${name}/collaborators/${username}`,
+            '--method',
+            'PUT',
+            '--input',
+            '-'
+          ],
+          { body: { permission: perm } }
+        )
+        appliedUsernames.add(username)
+      } catch (err) {
+        if (/Repository has been locked|HTTP 403/i.test(err.message)) {
+          print(dry, 'warn-collaborator', `${org}/${name}`, `${username} -> ${perm} rejected (repo locked or forbidden)`)
+        } else {
+          throw err
+        }
+      }
+    } else {
+      appliedUsernames.add(username)
+    }
   }
 
   for (const [username] of prevMap) {
     if (desiredMap.has(username)) continue
     print(dry, 'remove-collaborator', `${org}/${name}`, username)
-    if (!dry)
-      await gh(['api', `repos/${org}/${name}/collaborators/${username}`, '--method', 'DELETE'])
+    if (!dry) {
+      try {
+        await gh(['api', `repos/${org}/${name}/collaborators/${username}`, '--method', 'DELETE'])
+      } catch (err) {
+        if (!/Not Found/.test(err.message)) throw err
+      }
+    }
   }
+
+  return desired.filter((c) => appliedUsernames.has(c.username))
 }
 
 async function getCollaborators(org, name) {
