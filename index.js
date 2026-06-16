@@ -134,6 +134,7 @@ async function importRepo(org, name) {
 
   if (repo.has_wiki === false) entry.wiki = false
   if (repo.has_projects === false) entry.projects = false
+  if (repo.is_template === true) entry.template = true
 
   if (repo.security_and_analysis) {
     const sa = repo.security_and_analysis
@@ -365,6 +366,7 @@ function seed(config, opts = {}) {
     if (repo.merging) entry.merging = repo.merging
     if (repo.wiki !== undefined) entry.wiki = repo.wiki
     if (repo.projects !== undefined) entry.projects = repo.projects
+    if (typeof repo.template === 'boolean') entry.template = repo.template
     if (repo.security) entry.security = repo.security
     if (repo.topics) entry.topics = repo.topics
     if (repo.teams) entry.teams = repo.teams
@@ -679,8 +681,9 @@ function repoChanged(repo, prev) {
   if (prev.archived && !repo.archived) return true
   const settings = {}
   const prevSettings = {}
-  for (const k of ['description', 'homepage', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'security']) {
+  for (const k of ['description', 'homepage', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'security', 'template']) {
     if (repo[k] === undefined) continue
+    if (k === 'template' && typeof repo[k] !== 'boolean') continue
     settings[k] = repo[k]
     prevSettings[k] = prev[k]
   }
@@ -762,8 +765,9 @@ async function reconcile(org, repo, prev, dry, done, opts) {
 
   const settings = {}
   const prevSettings = {}
-  for (const k of ['description', 'homepage', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'security']) {
+  for (const k of ['description', 'homepage', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'security', 'template']) {
     if (repo[k] === undefined) continue
+    if (k === 'template' && typeof repo[k] !== 'boolean') continue
     settings[k] = repo[k]
     prevSettings[k] = prev[k]
   }
@@ -779,6 +783,7 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   if (repo.merging) done.merging = repo.merging
   if (repo.wiki !== undefined) done.wiki = repo.wiki
   if (repo.projects !== undefined) done.projects = repo.projects
+  if (typeof repo.template === 'boolean') done.template = repo.template
   if (repo.security) done.security = repo.security
 
   if (repo.security && repo.security.codeScanningDefaultSetup !== undefined && current) {
@@ -879,6 +884,7 @@ async function reconcileSettings(org, repo, dry) {
   if (repo.defaultBranch) patch.default_branch = repo.defaultBranch
   if (repo.wiki !== undefined) patch.has_wiki = repo.wiki
   if (repo.projects !== undefined) patch.has_projects = repo.projects
+  if (typeof repo.template === 'boolean') patch.is_template = repo.template
   if (repo.merging) {
     const m = repo.merging
     if (m.squashOnly !== undefined) {
