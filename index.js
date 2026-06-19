@@ -136,6 +136,11 @@ async function importRepo(org, name) {
   if (repo.has_projects === false) entry.projects = false
   if (repo.is_template === true) entry.template = true
 
+  try {
+    const access = JSON.parse(await gh(['api', `repos/${org}/${name}/actions/permissions/access`]))
+    if (access.access_level && access.access_level !== 'none') entry.actionsAccess = access.access_level
+  } catch {}
+
   if (repo.security_and_analysis) {
     const sa = repo.security_and_analysis
     const sec = {}
@@ -367,6 +372,7 @@ function seed(config, opts = {}) {
     if (repo.wiki !== undefined) entry.wiki = repo.wiki
     if (repo.projects !== undefined) entry.projects = repo.projects
     if (typeof repo.template === 'boolean') entry.template = repo.template
+    if (repo.actionsAccess !== undefined) entry.actionsAccess = repo.actionsAccess
     if (repo.security) entry.security = repo.security
     if (repo.topics) entry.topics = repo.topics
     if (repo.teams) entry.teams = repo.teams
@@ -695,6 +701,7 @@ function repoChanged(repo, prev) {
   if (changed(repo.environments, prev.environments)) return true
   if ((repo.rulesets || prev.rulesets) && changed(repo.rulesets, prev.rulesets)) return true
   if ((repo.npm || prev.npm) && changed(repo.npm, prev.npm)) return true
+  if (repo.actionsAccess !== undefined && repo.actionsAccess !== prev.actionsAccess) return true
   if (repo.secrets) return true
   if (repo.environments && repo.environments.some((e) => e.secrets)) return true
   if (repo.init && !prev.initialized) return true
@@ -789,6 +796,11 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   if (repo.security && repo.security.codeScanningDefaultSetup !== undefined && current) {
     await reconcileCodeScanning(org, repo.name, repo.security.codeScanningDefaultSetup, dry)
   }
+
+  if (repo.actionsAccess !== undefined && current && repo.actionsAccess !== prev.actionsAccess) {
+    await reconcileActionsAccess(org, repo.name, repo.actionsAccess, dry)
+  }
+  if (repo.actionsAccess !== undefined) done.actionsAccess = repo.actionsAccess
 
   if (repo.topics && current && changed(repo.topics, prev.topics)) {
     await reconcileTopics(org, repo.name, repo.topics, dry)
@@ -961,6 +973,18 @@ async function reconcileSettings(org, repo, dry) {
         throw err
       }
     }
+  }
+}
+
+async function reconcileActionsAccess(org, name, level, dry) {
+  if (!['none', 'organization', 'enterprise'].includes(level)) {
+    throw new Error('invalid actionsAccess "' + level + '" for ' + org + '/' + name + ' (expected none|organization|enterprise)')
+  }
+  print(dry, 'actions-access', `${org}/${name}`, level)
+  if (!dry) {
+    await gh(['api', `repos/${org}/${name}/actions/permissions/access`, '--method', 'PUT', '--input', '-'], {
+      body: { access_level: level }
+    })
   }
 }
 
