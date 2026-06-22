@@ -1781,7 +1781,7 @@ async function buildRulesetBody(org, ruleset) {
     rules.push({
       type: 'workflows',
       parameters: {
-        do_not_enforce_on_create: false,
+        do_not_enforce_on_create: ruleset.doNotEnforceWorkflowsOnCreate || false,
         workflows: ruleset.requiredWorkflows.map((w) => ({
           path: w.path,
           repository_id: w.repositoryId,
