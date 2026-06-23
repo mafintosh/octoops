@@ -12,7 +12,7 @@ const PERMISSIONS = {
   admin: 'admin'
 }
 
-module.exports = { apply, importOrg, seed, filter, resync, loadConfig }
+module.exports = { apply, importOrg, seed, filter, resync, loadConfig, renameRepo }
 
 const PERMISSIONS_REVERSE = {
   pull: 'read',
@@ -386,6 +386,45 @@ function seed(config, opts = {}) {
 
   if (opts.statePath) saveState(opts.statePath, state)
   console.log('seeded state for ' + (config.teams ? config.teams.length + ' teams and ' : '') + (config.repos || []).length + ' repos')
+}
+
+async function renameRepo(configPath, from, to, opts = {}) {
+  const resolvedConfigPath = path.resolve(configPath)
+  const raw = JSON.parse(fs.readFileSync(resolvedConfigPath, 'utf-8'))
+  const org = raw.org
+  if (!org) throw new Error('config ' + resolvedConfigPath + ' has no "org" field; rename must be run against the file that declares the org and the repo')
+
+  const repos = raw.repos || []
+  const idx = repos.findIndex((r) => r.name === from)
+  if (idx === -1) throw new Error('repo "' + from + '" not found in ' + resolvedConfigPath + ' (rename must run against the file that contains the repo entry)')
+
+  if (repos.some((r) => r.name === to)) {
+    throw new Error('repo "' + to + '" already exists in ' + resolvedConfigPath)
+  }
+
+  const statePath = opts.statePath || resolvedConfigPath.replace(/\.json$/, '.state.json')
+  const dry = opts.dry === true
+
+  print(dry, 'rename-repo', org, from + ' -> ' + to)
+  if (!dry) {
+    await gh(['api', `repos/${org}/${from}`, '--method', 'PATCH', '--input', '-'], {
+      body: { name: to }
+    })
+  }
+
+  raw.repos[idx].name = to
+  if (!dry) {
+    fs.writeFileSync(resolvedConfigPath, JSON.stringify(raw, null, 2) + '\n')
+
+    const state = loadState(statePath)
+    const oldKey = org + '/' + from
+    const newKey = org + '/' + to
+    if (state[oldKey] !== undefined) {
+      state[newKey] = state[oldKey]
+      delete state[oldKey]
+      saveState(statePath, state)
+    }
+  }
 }
 
 async function resync(config, opts = {}) {

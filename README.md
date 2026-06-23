@@ -37,6 +37,15 @@ Resync state from live GitHub (use this if your state file got out of sync):
 octoops resync config.json
 ```
 
+Rename a repo on GitHub and rewrite the config + state file in one shot:
+
+```bash
+octoops rename config.json old-name new-name
+octoops rename --dry-run config.json old-name new-name
+```
+
+The repo entry must live in the file you pass — extends/shared files are not searched. The state key (`<org>/<old>`) is rewritten to `<org>/<new>` so subsequent applies see no diff.
+
 Respects GitHub API rate limits automatically.
 
 ## Configuration

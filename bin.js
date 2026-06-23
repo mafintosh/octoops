@@ -2,7 +2,7 @@
 
 const { command, summary, flag, arg } = require('paparam')
 const path = require('path')
-const { apply, importOrg, seed, filter, resync, loadConfig } = require('.')
+const { apply, importOrg, seed, filter, resync, loadConfig, renameRepo } = require('.')
 
 const applyCmd = command(
   'apply',
@@ -88,6 +88,19 @@ const listCmd = command(
   }
 )
 
+const renameCmd = command(
+  'rename',
+  summary('Rename a repo on GitHub and update the config and state files'),
+  arg('<config>', 'Path to config JSON file containing the repo entry'),
+  arg('<from>', 'Current repo name'),
+  arg('<to>', 'New repo name'),
+  flag('--dry-run|-n', 'Show what would change without making changes'),
+  async function () {
+    const configPath = path.resolve(renameCmd.args.config)
+    await renameRepo(configPath, renameCmd.args.from, renameCmd.args.to, { dry: renameCmd.flags.dryRun })
+  }
+)
+
 const filterCmd = command(
   'filter',
   summary('Filter a config file (keep/prune repos, teams, members)'),
@@ -127,7 +140,8 @@ const cmd = command(
   seedCmd,
   resyncCmd,
   listCmd,
-  filterCmd
+  filterCmd,
+  renameCmd
 )
 
 cmd.parse()
