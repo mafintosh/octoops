@@ -394,6 +394,7 @@ function seed(config, opts = {}) {
     if (repo.environments) entry.environments = repo.environments
     if (repo.rulesets) entry.rulesets = repo.rulesets
     if (repo.npm) entry.npm = repo.npm
+    if (repo.githubPackages) entry.githubPackages = repo.githubPackages
     state[key] = entry
   }
 
@@ -539,14 +540,6 @@ async function apply(config, opts = {}) {
 
     if (config.pruneOfflineRunners) {
       await pruneOfflineRunners(config.org, dry)
-    }
-
-    if (config.githubPackages && changed(config.githubPackages, state.githubPackages)) {
-      await reconcileGithubPackages(config.org, config.githubPackages, dry)
-      if (!dry) {
-        state.githubPackages = config.githubPackages
-        if (opts.statePath) saveState(opts.statePath, state)
-      }
     }
 
     if (config.teams || state.teams) {
@@ -753,6 +746,7 @@ function repoChanged(repo, prev) {
   if (changed(repo.environments, prev.environments)) return true
   if ((repo.rulesets || prev.rulesets) && changed(repo.rulesets, prev.rulesets)) return true
   if ((repo.npm || prev.npm) && changed(repo.npm, prev.npm)) return true
+  if ((repo.githubPackages || prev.githubPackages) && changed(repo.githubPackages, prev.githubPackages)) return true
   if (repo.actionsAccess !== undefined && repo.actionsAccess !== prev.actionsAccess) return true
   if (repo.secrets) return true
   if (repo.environments && repo.environments.some((e) => e.secrets)) return true
@@ -918,6 +912,11 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     for (const npm of npms) await reconcileNpm(org, repo.name, npm, dry)
   }
   if (repo.npm) done.npm = repo.npm
+
+  if (repo.githubPackages && changed(repo.githubPackages, prev.githubPackages) && current) {
+    await reconcileGithubPackages(org, repo.name, repo.githubPackages, dry)
+  }
+  if (repo.githubPackages) done.githubPackages = repo.githubPackages
 
   const configDir = opts.configPath ? path.dirname(opts.configPath) : null
 
@@ -1273,11 +1272,11 @@ async function listHostedRunnerImages(org) {
   return [...(github.images || []), ...(partner.images || [])]
 }
 
-async function reconcileGithubPackages(org, desired, dry) {
-  for (const entry of desired) {
+async function reconcileGithubPackages(org, repoName, desired, dry) {
+  const entries = Array.isArray(desired) ? desired : [desired]
+  for (const entry of entries) {
     const type = entry.type || 'npm'
-    const name = entry.name
-    if (!name) throw new Error('githubPackages entry missing name')
+    const name = entry.name || repoName
     if (!entry.visibility) throw new Error('githubPackages entry "' + name + '" missing visibility')
     if (!['public', 'private', 'internal'].includes(entry.visibility)) {
       throw new Error('githubPackages entry "' + name + '" has invalid visibility: ' + entry.visibility)

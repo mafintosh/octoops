@@ -266,21 +266,29 @@ These map to GitHub's `*_enabled_for_new_repositories` fields on the org setting
 
 ### GitHub Packages visibility
 
-Set the visibility of an org's GitHub Packages by package name:
+Set the visibility of a repo's GitHub Packages by attaching `githubPackages` to the repo entry. Accepts a single object or an array:
 
 ```json
 {
-  "org": "my-org",
-  "githubPackages": [
-    { "name": "@my-org/foo", "visibility": "private" },
-    { "name": "my-tool", "visibility": "public" }
+  "repos": [
+    {
+      "name": "my-tool",
+      "githubPackages": { "visibility": "private" }
+    },
+    {
+      "name": "foo",
+      "githubPackages": [
+        { "name": "@my-org/foo", "visibility": "private" },
+        { "name": "@my-org/foo-cli", "visibility": "private" }
+      ]
+    }
   ]
 }
 ```
 
 Fields:
 
-- `name` — required, the package name (with `@scope/` prefix if scoped).
+- `name` — optional, defaults to the repo name. Use the full package name (with `@scope/` prefix for scoped packages).
 - `visibility` — required, one of `"public"` | `"private"` | `"internal"`.
 - `type` — optional, defaults to `"npm"`. Other types (e.g. `"container"`) work the same way via the same API.
 
@@ -288,7 +296,8 @@ Behavior:
 
 - Apply errors if the package isn't published yet on GitHub Packages — publish it first (e.g. via your trusted-publishing workflow), then octoops can set visibility.
 - No-op when current visibility already matches.
-- Tracked in state; removing an entry from config leaves the package's visibility untouched (octoops won't flip it back).
+- Tracked in state on the repo; removing an entry from config leaves the package's visibility untouched (octoops won't flip it back).
+- Your gh auth needs `read:packages` and `write:packages` scopes — `gh auth refresh -h github.com -s read:packages,write:packages` if you hit a 403.
 
 ### Runners
 
