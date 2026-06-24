@@ -2108,7 +2108,7 @@ async function createRepo(org, repo) {
   ]
   if (repo.description) args.push('--description', repo.description)
   if (repo.homepage) args.push('--homepage', repo.homepage)
-  if (repo.template) args.push('--template', repo.template)
+  if (typeof repo.template === 'string') args.push('--template', repo.template)
   else if (repo.init) args.push('--add-readme')
   await gh(args)
 }
