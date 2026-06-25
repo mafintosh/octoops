@@ -489,11 +489,14 @@ async function apply(config, opts = {}) {
   const presets = config.presets || {}
 
   if ((config.admins || config.members) && config.teams) {
-    const orgMembers = new Set([...(config.admins || []), ...(config.members || [])])
+    const allowed = new Set([
+      ...(config.admins || []).map((u) => u.toLowerCase()),
+      ...(config.members || []).map((u) => u.toLowerCase())
+    ])
     const missing = []
     for (const team of config.teams) {
       for (const m of team.members || []) {
-        if (!orgMembers.has(m.username)) {
+        if (!allowed.has(m.username.toLowerCase())) {
           missing.push(`${m.username} (team "${team.name}")`)
         }
       }
@@ -501,7 +504,7 @@ async function apply(config, opts = {}) {
     if (missing.length) {
       throw new Error(
         'team members not declared in admins/members:\n  - ' + missing.join('\n  - ') +
-        '\nadd them to the admins or members list to allow team membership'
+        '\nadd them to admins/members (extend a shared file if the canonical list lives elsewhere)'
       )
     }
   }
