@@ -37,6 +37,25 @@ Resync state from live GitHub (use this if your state file got out of sync):
 octoops resync config.json
 ```
 
+Apply a manifest that orchestrates multiple configs in one shot:
+
+```json
+// org-manifest.json
+{
+  "includes": [
+    "./team-a/config.json",
+    "./team-b/config.json",
+    "./tooling/config.json"
+  ]
+}
+```
+
+```bash
+octoops apply org-manifest.json
+```
+
+Each include is resolved relative to the manifest file and applied in order. Each gets its own `<name>.state.json` next to it — manifests don't share state. Manifests can include other manifests recursively (cycles error out). A manifest is orchestration-only; it can't also declare `org`/`repos`/`teams`/etc. — octoops errors if both are present so the file's role stays clear.
+
 Rename a repo on GitHub and rewrite the config + state file in one shot:
 
 ```bash

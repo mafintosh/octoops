@@ -2,7 +2,7 @@
 
 const { command, summary, flag, arg } = require('paparam')
 const path = require('path')
-const { apply, importOrg, seed, filter, resync, loadConfig, renameRepo } = require('.')
+const { apply, importOrg, seed, filter, resync, loadConfig, renameRepo, expandIncludes } = require('.')
 
 const applyCmd = command(
   'apply',
@@ -10,18 +10,23 @@ const applyCmd = command(
   flag('--dry-run|-n', 'Show what would change without making changes'),
   flag('--audit', 'Write an audit log to audits/<timestamp>.log'),
   flag('--enterprise', 'Enable enterprise features (env reviewers on private repos)'),
-  arg('<config>', 'Path to config JSON file'),
+  arg('<config>', 'Path to config JSON file or manifest with "includes"'),
   async function () {
-    const configPath = path.resolve(applyCmd.args.config)
-    const config = loadConfig(configPath)
-    const statePath = configPath.replace(/\.json$/, '.state.json')
-    await apply(config, {
-      dry: applyCmd.flags.dryRun,
-      statePath,
-      configPath,
-      audit: applyCmd.flags.audit,
-      enterprise: applyCmd.flags.enterprise
-    })
+    const root = path.resolve(applyCmd.args.config)
+    const paths = expandIncludes(root)
+    const isManifest = paths.length !== 1 || paths[0] !== root
+    for (const configPath of paths) {
+      if (isManifest) console.log('\n=== applying ' + path.relative(process.cwd(), configPath) + ' ===\n')
+      const config = loadConfig(configPath)
+      const statePath = configPath.replace(/\.json$/, '.state.json')
+      await apply(config, {
+        dry: applyCmd.flags.dryRun,
+        statePath,
+        configPath,
+        audit: applyCmd.flags.audit,
+        enterprise: applyCmd.flags.enterprise
+      })
+    }
   }
 )
 

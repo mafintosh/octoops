@@ -12,7 +12,7 @@ const PERMISSIONS = {
   admin: 'admin'
 }
 
-module.exports = { apply, importOrg, seed, filter, resync, loadConfig, renameRepo }
+module.exports = { apply, importOrg, seed, filter, resync, loadConfig, renameRepo, expandIncludes }
 
 const PERMISSIONS_REVERSE = {
   pull: 'read',
@@ -698,6 +698,30 @@ function resolveDefaultsEntry(name, defaults, seen) {
 
 function loadConfig(configPath) {
   return loadConfigInner(path.resolve(configPath), new Set())
+}
+
+function expandIncludes(configPath) {
+  return expandIncludesInner(path.resolve(configPath), new Set())
+}
+
+function expandIncludesInner(configPath, seen) {
+  if (seen.has(configPath)) throw new Error('includes cycle at ' + configPath)
+  const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
+  if (!raw.includes) return [configPath]
+
+  const FORBIDDEN = ['org', 'repos', 'teams', 'admins', 'members', 'security', 'runnerGroups', 'hostedRunners', 'pruneOfflineRunners', 'enterprise', 'extends', 'presets', 'defaults']
+  for (const k of FORBIDDEN) {
+    if (k in raw) throw new Error('manifest ' + configPath + ' has both "includes" and "' + k + '" — manifests are orchestration-only')
+  }
+
+  const next = new Set(seen)
+  next.add(configPath)
+  const dir = path.dirname(configPath)
+  const out = []
+  for (const ref of raw.includes) {
+    out.push(...expandIncludesInner(path.resolve(dir, ref), next))
+  }
+  return out
 }
 
 function loadConfigInner(configPath, seen) {
