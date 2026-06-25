@@ -490,12 +490,19 @@ async function apply(config, opts = {}) {
 
   if ((config.admins || config.members) && config.teams) {
     const orgMembers = new Set([...(config.admins || []), ...(config.members || [])])
+    const missing = []
     for (const team of config.teams) {
       for (const m of team.members || []) {
         if (!orgMembers.has(m.username)) {
-          console.error(`warning: ${m.username} is in team "${team.name}" but not in admins/members`)
+          missing.push(`${m.username} (team "${team.name}")`)
         }
       }
+    }
+    if (missing.length) {
+      throw new Error(
+        'team members not declared in admins/members:\n  - ' + missing.join('\n  - ') +
+        '\nadd them to the admins or members list to allow team membership'
+      )
     }
   }
 
