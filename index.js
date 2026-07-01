@@ -264,6 +264,19 @@ async function importRepo(org, name) {
               strict: rule.parameters.strict_required_status_checks_policy || false,
               checks: (rule.parameters.required_status_checks || []).map((c) => c.context)
             }
+            if (rule.parameters.do_not_enforce_on_create) {
+              r.requiredStatusChecks.doNotEnforceOnCreate = true
+            }
+          }
+          if (rule.type === 'workflows' && rule.parameters) {
+            r.requiredWorkflows = (rule.parameters.workflows || []).map((w) => {
+              const e = { path: w.path, repositoryId: w.repository_id }
+              if (w.ref && w.ref !== 'main') e.ref = w.ref
+              return e
+            })
+            if (rule.parameters.do_not_enforce_on_create) {
+              r.doNotEnforceWorkflowsOnCreate = true
+            }
           }
         }
         if (full.bypass_actors && full.bypass_actors.length) {
@@ -1798,6 +1811,7 @@ async function buildRulesetBody(org, ruleset) {
     rules.push({
       type: 'required_status_checks',
       parameters: {
+        do_not_enforce_on_create: ruleset.requiredStatusChecks.doNotEnforceOnCreate || false,
         strict_required_status_checks_policy: ruleset.requiredStatusChecks.strict || false,
         required_status_checks: ruleset.requiredStatusChecks.checks.map((c) => {
           if (typeof c === 'string') return { context: c }
@@ -1820,7 +1834,7 @@ async function buildRulesetBody(org, ruleset) {
     rules.push({
       type: 'workflows',
       parameters: {
-        do_not_enforce_on_create: false,
+        do_not_enforce_on_create: ruleset.doNotEnforceWorkflowsOnCreate || false,
         workflows: ruleset.requiredWorkflows.map((w) => ({
           path: w.path,
           repository_id: w.repositoryId,

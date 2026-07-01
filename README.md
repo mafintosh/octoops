@@ -403,9 +403,10 @@ Each entry in `rulesets` supports:
 - `requireSignedCommits: true` — require signed commits
 - `requirePR: { approvals, dismissStale, codeOwners, lastPushApproval, resolveThreads, requiredReviewers }` — require pull requests
 - `requirePR.requiredReviewers` — see "Required reviewers" below
-- `requiredStatusChecks: { strict, checks: [...] }` — required CI checks; `checks` is strings or `{ context, integrationId }`
+- `requiredStatusChecks: { strict, checks: [...], doNotEnforceOnCreate }` — required CI checks; `checks` is strings or `{ context, integrationId }`; `doNotEnforceOnCreate: true` skips enforcing the checks when a branch/tag is created (defaults to `false`)
 - `filePathRestrictions: ["..."]` — glob restrictions on which file paths can change
 - `requiredWorkflows: [{ path, repositoryId, ref }]` — required GitHub Actions workflows
+- `doNotEnforceWorkflowsOnCreate: true` — skip enforcing `requiredWorkflows` when a branch/tag is created (defaults to `false`)
 - `bypassActors: [...]` — entries: `{ team }`, `{ username }`, `{ app }` (GitHub App slug, e.g. `"dependabot"`), or `{ type: "OrganizationAdmin" }`, each with optional `mode: "always"|"pull_request"`
 
 #### Required reviewers (beta)
