@@ -1068,7 +1068,8 @@ async function reconcileSettings(org, repo, dry) {
   if (repo.security) {
     const sa = {}
     const s = repo.security
-    if (s.advancedSecurity !== undefined) sa.advanced_security = { status: s.advancedSecurity ? 'enabled' : 'disabled' }
+    const isPublic = repo.private === false || repo.internal === true
+    if (s.advancedSecurity !== undefined && !isPublic) sa.advanced_security = { status: s.advancedSecurity ? 'enabled' : 'disabled' }
     if (s.secretScanning !== undefined) sa.secret_scanning = { status: s.secretScanning ? 'enabled' : 'disabled' }
     if (s.secretScanningPushProtection !== undefined) sa.secret_scanning_push_protection = { status: s.secretScanningPushProtection ? 'enabled' : 'disabled' }
     if (s.secretScanningValidityChecks !== undefined) sa.secret_scanning_validity_checks = { status: s.secretScanningValidityChecks ? 'enabled' : 'disabled' }
