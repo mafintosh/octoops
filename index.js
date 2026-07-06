@@ -931,7 +931,7 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   }
 
   if (current && changed(settings, prevSettings)) {
-    await reconcileSettings(org, repo, dry)
+    await reconcileSettings(org, repo, dry, prev)
   }
   if (repo.description !== undefined) done.description = repo.description
   if (repo.homepage !== undefined) done.homepage = repo.homepage
@@ -1042,7 +1042,7 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   }
 }
 
-async function reconcileSettings(org, repo, dry) {
+async function reconcileSettings(org, repo, dry, prev = {}) {
   const patch = {}
 
   if (repo.description !== undefined) patch.description = repo.description
@@ -1068,7 +1068,7 @@ async function reconcileSettings(org, repo, dry) {
   if (repo.security) {
     const sa = {}
     const s = repo.security
-    const isPublic = repo.private === false || repo.internal === true
+    const isPublic = repo.private === false || repo.internal === true || (repo.private === undefined && prev.private === false)
     if (s.advancedSecurity !== undefined && !isPublic) sa.advanced_security = { status: s.advancedSecurity ? 'enabled' : 'disabled' }
     if (s.secretScanning !== undefined) sa.secret_scanning = { status: s.secretScanning ? 'enabled' : 'disabled' }
     if (s.secretScanningPushProtection !== undefined) sa.secret_scanning_push_protection = { status: s.secretScanningPushProtection ? 'enabled' : 'disabled' }
