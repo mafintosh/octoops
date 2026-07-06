@@ -474,6 +474,7 @@ async function resync(config, opts = {}) {
 async function apply(config, opts = {}) {
   const dry = opts.dry === true
   if (config.enterprise) opts = { ...opts, enterprise: true }
+  validateConfig(config)
   const state = loadState(opts.statePath)
 
   if (opts.audit) {
@@ -694,6 +695,76 @@ function resolveDefaultsEntry(name, defaults, seen) {
     }
   }
   return deepMerge(merged, entry)
+}
+
+const ROOT_KEYS = new Set([
+  'org', 'enterprise', 'extends', 'includes',
+  'presets', 'defaults',
+  'repos', 'teams', 'admins', 'members',
+  'security', 'runnerGroups', 'hostedRunners', 'pruneOfflineRunners'
+])
+
+const REPO_KEYS = new Set([
+  'name', 'description', 'homepage',
+  'private', 'internal',
+  'defaultBranch', 'wiki', 'projects', 'archived', 'init', 'template',
+  'merging', 'topics',
+  'teams', 'collaborators',
+  'branchProtection', 'environments', 'rulesets',
+  'npm', 'secrets', 'security',
+  'actionsAccess', 'githubPackages',
+  'defaults'
+])
+
+const DEFAULTS_KEYS = new Set([...REPO_KEYS, 'extends'])
+
+const REPO_ALIASES = { extends: 'defaults', inherits: 'defaults' }
+
+function validateConfig(config) {
+  for (const k of Object.keys(config)) {
+    if (!ROOT_KEYS.has(k)) console.error('warning: unknown property "' + k + '" at config root' + suggest(k, ROOT_KEYS, null))
+  }
+  for (const raw of config.repos || []) {
+    for (const k of Object.keys(raw)) {
+      if (!REPO_KEYS.has(k)) console.error('warning: unknown property "' + k + '" on repo "' + (raw.name || '?') + '"' + suggest(k, REPO_KEYS, REPO_ALIASES))
+    }
+  }
+  for (const name of Object.keys(config.defaults || {})) {
+    const entry = config.defaults[name]
+    for (const k of Object.keys(entry || {})) {
+      if (!DEFAULTS_KEYS.has(k)) console.error('warning: unknown property "' + k + '" on defaults "' + name + '"' + suggest(k, DEFAULTS_KEYS, null))
+    }
+  }
+}
+
+function suggest(unknown, allowed, aliases) {
+  if (aliases && aliases[unknown]) return ' — did you mean "' + aliases[unknown] + '"?'
+  let best = null
+  let bestDist = Infinity
+  for (const k of allowed) {
+    const d = editDistance(unknown, k)
+    if (d < bestDist) { bestDist = d; best = k }
+  }
+  if (best && bestDist <= Math.max(2, Math.floor(unknown.length / 3))) return ' — did you mean "' + best + '"?'
+  return ''
+}
+
+function editDistance(a, b) {
+  const m = a.length, n = b.length
+  if (!m) return n
+  if (!n) return m
+  const prev = new Array(n + 1)
+  const curr = new Array(n + 1)
+  for (let j = 0; j <= n; j++) prev[j] = j
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost)
+    }
+    for (let j = 0; j <= n; j++) prev[j] = curr[j]
+  }
+  return prev[n]
 }
 
 function loadConfig(configPath) {
@@ -1030,17 +1101,20 @@ async function reconcileSettings(org, repo, dry) {
     } catch (err) {
       const is422 = /Validation Failed|HTTP 422/i.test(err.message)
       const isAdvancedSecurityPublic = /Advanced security is always available for public repos/i.test(err.message)
-      if (is422 && isAdvancedSecurityPublic && patch.security_and_analysis && patch.security_and_analysis.advanced_security) {
-        const retry = { ...patch, security_and_analysis: { ...patch.security_and_analysis } }
-        delete retry.security_and_analysis.advanced_security
-        if (!Object.keys(retry.security_and_analysis).length) delete retry.security_and_analysis
+      const isSecurityEnforced = /enforced security configuration prevented modifying/i.test(err.message)
+      if (is422 && (isAdvancedSecurityPublic || isSecurityEnforced) && patch.security_and_analysis) {
+        const retry = { ...patch }
+        delete retry.security_and_analysis
+        const reason = isSecurityEnforced
+          ? 'security enablement is enforced by an org policy — retrying without security_and_analysis'
+          : 'advanced security always on for public repos — retrying without it'
         if (Object.keys(retry).length) {
-          print(dry, 'update-retry', `${org}/${repo.name}`, 'advanced security always on for public repos — retrying without it')
+          print(dry, 'update-retry', `${org}/${repo.name}`, reason)
           await gh(['api', `repos/${org}/${repo.name}`, '--method', 'PATCH', '--input', '-'], {
             body: retry
           })
         } else {
-          print(dry, 'skip-update', `${org}/${repo.name}`, 'advanced security always on for public repos and no other fields')
+          print(dry, 'skip-update', `${org}/${repo.name}`, reason + ' and no other fields')
         }
       } else if (is422 && (patch.private !== undefined || patch.visibility !== undefined)) {
         const retry = { ...patch }
