@@ -1101,37 +1101,45 @@ async function reconcileSettings(org, repo, dry, prev = {}) {
       })
     } catch (err) {
       const is422 = /Validation Failed|HTTP 422/i.test(err.message)
+      if (!is422) throw err
+
       const isAdvancedSecurityPublic = /Advanced security is always available for public repos/i.test(err.message)
       const isSecurityEnforced = /enforced security configuration prevented modifying/i.test(err.message)
-      if (is422 && (isAdvancedSecurityPublic || isSecurityEnforced) && patch.security_and_analysis) {
-        const retry = { ...patch }
+      const isSecurityIssue = isAdvancedSecurityPublic || isSecurityEnforced
+      const isVisibilityIssue = patch.private !== undefined || patch.visibility !== undefined
+
+      const retry = { ...patch }
+      const reasons = []
+
+      if (isSecurityIssue && retry.security_and_analysis) {
         delete retry.security_and_analysis
-        const reason = isSecurityEnforced
-          ? 'security enablement is enforced by an org policy — retrying without security_and_analysis'
-          : 'advanced security always on for public repos — retrying without it'
-        if (Object.keys(retry).length) {
-          print(dry, 'update-retry', `${org}/${repo.name}`, reason)
-          await gh(['api', `repos/${org}/${repo.name}`, '--method', 'PATCH', '--input', '-'], {
-            body: retry
-          })
-        } else {
-          print(dry, 'skip-update', `${org}/${repo.name}`, reason + ' and no other fields')
-        }
-      } else if (is422 && (patch.private !== undefined || patch.visibility !== undefined)) {
-        const retry = { ...patch }
+        reasons.push(isSecurityEnforced ? 'security enforced by org policy' : 'advanced security always on for public repos')
+      }
+      if (isVisibilityIssue) {
         delete retry.private
         delete retry.visibility
-        if (Object.keys(retry).length) {
-          print(dry, 'update-retry', `${org}/${repo.name}`, 'visibility rejected (likely a fork) — retrying without it')
-          await gh(['api', `repos/${org}/${repo.name}`, '--method', 'PATCH', '--input', '-'], {
-            body: retry
-          })
-        } else {
-          print(dry, 'skip-update', `${org}/${repo.name}`, 'visibility rejected (likely a fork) and no other fields')
+        reasons.push('visibility rejected (likely a fork)')
+        // On a fork of a public repo we can't set advanced_security either; drop preemptively so the retry doesn't 422 again
+        if (retry.security_and_analysis && retry.security_and_analysis.advanced_security) {
+          const sa = { ...retry.security_and_analysis }
+          delete sa.advanced_security
+          if (Object.keys(sa).length) retry.security_and_analysis = sa
+          else delete retry.security_and_analysis
+          reasons.push('dropped advanced_security (public fork)')
         }
-      } else {
-        throw err
       }
+
+      if (!reasons.length) throw err
+
+      if (!Object.keys(retry).length) {
+        print(dry, 'skip-update', `${org}/${repo.name}`, reasons.join('; ') + ' and no other fields')
+        return
+      }
+
+      print(dry, 'update-retry', `${org}/${repo.name}`, reasons.join('; '))
+      await gh(['api', `repos/${org}/${repo.name}`, '--method', 'PATCH', '--input', '-'], {
+        body: retry
+      })
     }
   }
 }
