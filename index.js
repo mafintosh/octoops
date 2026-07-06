@@ -533,7 +533,7 @@ async function apply(config, opts = {}) {
       }
     }
 
-    if (config.runnerGroups || state.runnerGroups) {
+    if ((config.runnerGroups || state.runnerGroups) && changed(config.runnerGroups || {}, state.runnerGroups || {})) {
       const applied = await reconcileRunnerGroups(config.org, config.runnerGroups || {}, state.runnerGroups || {}, dry)
       if (!dry) {
         state.runnerGroups = applied
@@ -541,7 +541,7 @@ async function apply(config, opts = {}) {
       }
     }
 
-    if (config.hostedRunners || state.hostedRunners) {
+    if ((config.hostedRunners || state.hostedRunners) && changed(config.hostedRunners || {}, state.hostedRunners || {})) {
       const applied = await reconcileHostedRunners(config.org, config.hostedRunners || {}, state.hostedRunners || {}, dry)
       if (!dry) {
         state.hostedRunners = applied
@@ -945,7 +945,10 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   if (repo.security) done.security = repo.security
 
   if (repo.security && repo.security.codeScanningDefaultSetup !== undefined && current) {
-    await reconcileCodeScanning(org, repo.name, repo.security.codeScanningDefaultSetup, dry)
+    const prevCs = prev.security && prev.security.codeScanningDefaultSetup
+    if (prevCs !== repo.security.codeScanningDefaultSetup) {
+      await reconcileCodeScanning(org, repo.name, repo.security.codeScanningDefaultSetup, dry)
+    }
   }
 
   if (repo.actionsAccess !== undefined && current && repo.actionsAccess !== prev.actionsAccess) {
