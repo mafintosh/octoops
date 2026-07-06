@@ -533,19 +533,27 @@ async function apply(config, opts = {}) {
       }
     }
 
-    if ((config.runnerGroups || state.runnerGroups) && changed(config.runnerGroups || {}, state.runnerGroups || {})) {
-      const applied = await reconcileRunnerGroups(config.org, config.runnerGroups || {}, state.runnerGroups || {}, dry)
-      if (!dry) {
-        state.runnerGroups = applied
-        if (opts.statePath) saveState(opts.statePath, state)
+    if (config.runnerGroups || state.runnerGroups) {
+      const desiredNormalized = {}
+      for (const n of Object.keys(config.runnerGroups || {})) desiredNormalized[n] = normalizeRunnerGroup(config.runnerGroups[n])
+      if (changed(desiredNormalized, state.runnerGroups || {})) {
+        const applied = await reconcileRunnerGroups(config.org, config.runnerGroups || {}, state.runnerGroups || {}, dry)
+        if (!dry) {
+          state.runnerGroups = applied
+          if (opts.statePath) saveState(opts.statePath, state)
+        }
       }
     }
 
-    if ((config.hostedRunners || state.hostedRunners) && changed(config.hostedRunners || {}, state.hostedRunners || {})) {
-      const applied = await reconcileHostedRunners(config.org, config.hostedRunners || {}, state.hostedRunners || {}, dry)
-      if (!dry) {
-        state.hostedRunners = applied
-        if (opts.statePath) saveState(opts.statePath, state)
+    if (config.hostedRunners || state.hostedRunners) {
+      const desiredNormalized = {}
+      for (const n of Object.keys(config.hostedRunners || {})) desiredNormalized[n] = normalizeHostedRunner(config.hostedRunners[n])
+      if (changed(desiredNormalized, state.hostedRunners || {})) {
+        const applied = await reconcileHostedRunners(config.org, config.hostedRunners || {}, state.hostedRunners || {}, dry)
+        if (!dry) {
+          state.hostedRunners = applied
+          if (opts.statePath) saveState(opts.statePath, state)
+        }
       }
     }
 
