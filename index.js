@@ -561,6 +561,17 @@ async function apply(config, opts = {}) {
       await pruneOfflineRunners(config.org, dry)
     }
 
+    if (config.apps || state.apps) {
+      const desiredNormalized = normalizeAppsList(config.apps || [])
+      if (changed(desiredNormalized, state.apps || [])) {
+        await reconcileApps(config.org, config.apps || [], dry)
+        if (!dry) {
+          state.apps = desiredNormalized
+          if (opts.statePath) saveState(opts.statePath, state)
+        }
+      }
+    }
+
     if (config.teams || state.teams) {
       if (Array.isArray(state.teams)) {
         const migrated = {}
@@ -709,7 +720,8 @@ const ROOT_KEYS = new Set([
   'org', 'enterprise', 'extends', 'includes',
   'presets', 'defaults',
   'repos', 'teams', 'admins', 'members',
-  'security', 'runnerGroups', 'hostedRunners', 'pruneOfflineRunners'
+  'security', 'runnerGroups', 'hostedRunners', 'pruneOfflineRunners',
+  'apps'
 ])
 
 const REPO_KEYS = new Set([
@@ -1425,6 +1437,71 @@ async function reconcileGithubPackages(org, repoName, desired, dry) {
       await gh(['api', `orgs/${org}/packages/${type}/${encoded}`, '--method', 'PATCH', '--input', '-'], {
         body: { visibility: entry.visibility }
       })
+    }
+  }
+}
+
+function normalizeAppsList(apps) {
+  return apps.map((a) => {
+    const out = { name: a.name }
+    if (a.allRepos === true) out.allRepos = true
+    else if (Array.isArray(a.repos)) out.repos = a.repos.slice().sort()
+    return out
+  })
+}
+
+async function reconcileApps(org, desired, dry) {
+  for (const entry of desired) {
+    if (!entry.name) throw new Error('apps entry missing name')
+    const hasAll = entry.allRepos === true
+    const hasSelected = Array.isArray(entry.repos)
+    if (hasAll && hasSelected) throw new Error('app "' + entry.name + '" has both allRepos and repos — pick one')
+    if (!hasAll && !hasSelected) throw new Error('app "' + entry.name + '" needs either allRepos: true or repos: [...]')
+    if (entry.allRepos === false) throw new Error('app "' + entry.name + '" has allRepos: false — use repos: [...] for selected access')
+  }
+
+  const installations = JSON.parse(await gh(['api', `orgs/${org}/installations`, '--paginate']))
+  const bySlug = new Map((installations.installations || installations).map((i) => [i.app_slug, i]))
+
+  for (const entry of desired) {
+    const install = bySlug.get(entry.name)
+    if (!install) throw new Error('app "' + entry.name + '" is not installed on ' + org + ' — install it via the UI first')
+
+    const wantsAll = entry.allRepos === true
+    const currentIsAll = install.repository_selection === 'all'
+
+    if (wantsAll !== currentIsAll) {
+      throw new Error(
+        'app "' + entry.name + '" scope mismatch: config wants ' + (wantsAll ? '"all"' : '"selected"') +
+        ' but installation is "' + install.repository_selection + '" — toggle it in the UI first ' +
+        '(github.com/organizations/' + org + '/settings/installations/' + install.id + ')'
+      )
+    }
+
+    if (wantsAll) continue
+
+    // "selected" — reconcile repo list
+    const installed = JSON.parse(await gh(['api', `orgs/${org}/installations/${install.id}/repositories`, '--paginate']))
+    const installedRepos = (installed.repositories || []).map((r) => r.name)
+    const installedSet = new Set(installedRepos)
+    const desiredSet = new Set(entry.repos)
+
+    for (const name of entry.repos) {
+      if (installedSet.has(name)) continue
+      const repo = JSON.parse(await gh(['api', `repos/${org}/${name}`]))
+      print(dry, 'app-add-repo', `${org}/${entry.name}`, name)
+      if (!dry) {
+        await gh(['api', `orgs/${org}/installations/${install.id}/repositories/${repo.id}`, '--method', 'PUT'])
+      }
+    }
+
+    for (const name of installedRepos) {
+      if (desiredSet.has(name)) continue
+      const repo = JSON.parse(await gh(['api', `repos/${org}/${name}`]))
+      print(dry, 'app-remove-repo', `${org}/${entry.name}`, name)
+      if (!dry) {
+        await gh(['api', `orgs/${org}/installations/${install.id}/repositories/${repo.id}`, '--method', 'DELETE'])
+      }
     }
   }
 }

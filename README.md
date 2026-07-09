@@ -318,6 +318,35 @@ Behavior:
 - Tracked in state on the repo; removing an entry from config leaves the package's visibility untouched (octoops won't flip it back).
 - Your gh auth needs `read:packages` and `write:packages` scopes — `gh auth refresh -h github.com -s read:packages,write:packages` if you hit a 403.
 
+### GitHub Apps installation scope
+
+Declare which repos each org-installed GitHub App can access. Octoops looks up the installation by app slug, then adds/removes repos from its selected list to match:
+
+```json
+{
+  "org": "my-org",
+  "apps": [
+    { "name": "dependabot", "allRepos": true },
+    { "name": "holepunchto", "repos": ["repo-a", "repo-b"] }
+  ]
+}
+```
+
+Fields per entry:
+
+- `name` — required, the app's slug (the part after `github.com/apps/`, same one used in ruleset `bypassActors: [{ app: "..." }]`).
+- Exactly **one** of:
+  - `allRepos: true` — the installation grants access to all current and future repos.
+  - `repos: ["..."]` — explicit list of repo names in the org.
+
+Behavior:
+
+- Requires an org admin `gh` token — no app private key needed.
+- Errors if the app isn't installed on the org (installation itself is UI-only).
+- Errors if the config's scope (`allRepos` vs `repos`) doesn't match the installation's current scope — that toggle is UI-only, with a link in the error to the settings page.
+- For `repos: [...]`, octoops PUTs/DELETEs individual repos to converge with the desired list.
+- Tracked in state and diffed against a normalized (repos sorted) shape, so a no-op apply skips the API fetches entirely.
+
 ### Runners
 
 Manage self-hosted runner groups and GitHub-hosted larger runners at the org level. Octoops doesn't provision the underlying machines for self-hosted runners — those still register with GitHub the usual way — but it manages how they're grouped and which repos can use them.
