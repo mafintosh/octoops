@@ -1481,7 +1481,7 @@ async function reconcileApps(org, desired, dry) {
     if (wantsAll) continue
 
     // "selected" — reconcile repo list
-    const installed = JSON.parse(await gh(['api', `orgs/${org}/installations/${install.id}/repositories`, '--paginate']))
+    const installed = JSON.parse(await gh(['api', `user/installations/${install.id}/repositories`, '--paginate']))
     const installedRepos = (installed.repositories || []).map((r) => r.name)
     const installedSet = new Set(installedRepos)
     const desiredSet = new Set(entry.repos)
@@ -1491,7 +1491,7 @@ async function reconcileApps(org, desired, dry) {
       const repo = JSON.parse(await gh(['api', `repos/${org}/${name}`]))
       print(dry, 'app-add-repo', `${org}/${entry.name}`, name)
       if (!dry) {
-        await gh(['api', `orgs/${org}/installations/${install.id}/repositories/${repo.id}`, '--method', 'PUT'])
+        await gh(['api', `user/installations/${install.id}/repositories/${repo.id}`, '--method', 'PUT'])
       }
     }
 
@@ -1500,7 +1500,7 @@ async function reconcileApps(org, desired, dry) {
       const repo = JSON.parse(await gh(['api', `repos/${org}/${name}`]))
       print(dry, 'app-remove-repo', `${org}/${entry.name}`, name)
       if (!dry) {
-        await gh(['api', `orgs/${org}/installations/${install.id}/repositories/${repo.id}`, '--method', 'DELETE'])
+        await gh(['api', `user/installations/${install.id}/repositories/${repo.id}`, '--method', 'DELETE'])
       }
     }
   }
