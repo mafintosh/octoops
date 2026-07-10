@@ -564,7 +564,7 @@ async function apply(config, opts = {}) {
     if (config.apps || state.apps) {
       const desiredNormalized = normalizeAppsList(config.apps || [])
       if (changed(desiredNormalized, state.apps || [])) {
-        await reconcileApps(config.org, config.apps || [], dry)
+        await reconcileApps(config.org, config.apps || [], state.apps || [], dry)
         if (!dry) {
           state.apps = desiredNormalized
           if (opts.statePath) saveState(opts.statePath, state)
@@ -1450,7 +1450,7 @@ function normalizeAppsList(apps) {
   })
 }
 
-async function reconcileApps(org, desired, dry) {
+async function reconcileApps(org, desired, prev, dry) {
   for (const entry of desired) {
     if (!entry.name) throw new Error('apps entry missing name')
     const hasAll = entry.allRepos === true
@@ -1480,14 +1480,13 @@ async function reconcileApps(org, desired, dry) {
 
     if (wantsAll) continue
 
-    // "selected" — reconcile repo list
-    const installed = JSON.parse(await gh(['api', `user/installations/${install.id}/repositories`, '--paginate']))
-    const installedRepos = (installed.repositories || []).map((r) => r.name)
-    const installedSet = new Set(installedRepos)
+    // "selected" — state-only reconcile (the list endpoint requires an OAuth user-access-token, not a PAT)
+    const prevEntry = (prev || []).find((p) => p.name === entry.name)
+    const prevRepos = new Set(prevEntry && Array.isArray(prevEntry.repos) ? prevEntry.repos : [])
     const desiredSet = new Set(entry.repos)
 
     for (const name of entry.repos) {
-      if (installedSet.has(name)) continue
+      if (prevRepos.has(name)) continue
       const repo = JSON.parse(await gh(['api', `repos/${org}/${name}`]))
       print(dry, 'app-add-repo', `${org}/${entry.name}`, name)
       if (!dry) {
@@ -1495,12 +1494,16 @@ async function reconcileApps(org, desired, dry) {
       }
     }
 
-    for (const name of installedRepos) {
+    for (const name of prevRepos) {
       if (desiredSet.has(name)) continue
       const repo = JSON.parse(await gh(['api', `repos/${org}/${name}`]))
       print(dry, 'app-remove-repo', `${org}/${entry.name}`, name)
       if (!dry) {
-        await gh(['api', `user/installations/${install.id}/repositories/${repo.id}`, '--method', 'DELETE'])
+        try {
+          await gh(['api', `user/installations/${install.id}/repositories/${repo.id}`, '--method', 'DELETE'])
+        } catch (err) {
+          if (!/Not Found/.test(err.message)) throw err
+        }
       }
     }
   }
