@@ -341,11 +341,30 @@ Fields per entry:
 
 Behavior:
 
-- Requires an org admin `gh` token — no app private key needed.
 - Errors if the app isn't installed on the org (installation itself is UI-only).
 - Errors if the config's scope (`allRepos` vs `repos`) doesn't match the installation's current scope — that toggle is UI-only, with a link in the error to the settings page.
-- For `repos: [...]`, octoops PUTs/DELETEs individual repos to converge with the desired list.
-- Tracked in state and diffed against a normalized (repos sorted) shape, so a no-op apply skips the API fetches entirely.
+- For `repos: [...]`, octoops state-tracks the applied list and PUTs/DELETEs individual repos to converge with the desired one. Idempotent PUTs; DELETE 404s are treated as already-removed.
+- Diffed against a normalized (repos sorted) shape, so a no-op apply skips the API calls entirely.
+
+**Token requirements** — this feature has stricter auth than the rest of octoops:
+
+- You must be the **Organization Owner** (not just admin/member).
+- You must be the **user who originally installed the app** on the org — GitHub scopes installation-modification permissions to the installer, not to any org owner.
+- You must supply a **classic Personal Access Token** (not the token `gh auth login` mints via OAuth). GitHub CLI's OAuth token is scoped to the "GitHub CLI" app and can't modify other apps' installations, even with correct org role and scopes.
+
+Create the classic PAT at [github.com/settings/tokens](https://github.com/settings/tokens) → Tokens (classic) → Generate new token, with scopes:
+
+- `admin:org`
+- `repo`
+- `read:user`
+
+If the org enforces SAML SSO, click **Enable SSO → Authorize** for the org on the token page.
+
+Then run apply with `GH_TOKEN` set for that invocation so your regular `gh auth` stays untouched:
+
+```bash
+GH_TOKEN=ghp_yourpathere octoops apply your-config.json
+```
 
 ### Runners
 
