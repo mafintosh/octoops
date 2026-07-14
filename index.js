@@ -545,7 +545,8 @@ async function apply(config, opts = {}) {
         config.org,
         orgSecretsPlan,
         state.orgSecrets,
-        dry
+        dry,
+        opts.allowOrgSecretDeletes === true
       )
       if (!dry && next !== null) {
         if (Object.keys(next).length) state.orgSecrets = next
@@ -2423,6 +2424,28 @@ async function createRepo(org, repo) {
 function parseSecretsFile(filePath) {
   const text = fs.readFileSync(filePath, 'utf-8')
   const out = {}
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eq = trimmed.indexOf('=')
+    if (eq === -1) continue
+    const key = trimmed.slice(0, eq).trim()
+    let value = trimmed.slice(eq + 1).trim()
+    if (value.length >= 2) {
+      const first = value[0]
+      const last = value[value.length - 1]
+      if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+        value = value.slice(1, -1)
+      }
+    }
+    out[key] = value
+  }
+  return out
+}
+
+function parseOrgSecretsFile(filePath) {
+  const text = fs.readFileSync(filePath, 'utf-8')
+  const out = {}
   const lines = text.split(/\r?\n/)
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
@@ -2490,7 +2513,7 @@ function prepareOrgSecrets(config, configDir) {
     return { missing: true, file: config.file }
   }
 
-  const values = parseSecretsFile(filePath)
+  const values = parseOrgSecretsFile(filePath)
   const policies = {}
   for (const name of Object.keys(config.secrets)) {
     policies[name] = normalizeOrgSecretPolicy(name, config.secrets[name])
@@ -2512,7 +2535,7 @@ function prepareOrgSecrets(config, configDir) {
   return { values, policies }
 }
 
-async function reconcileOrgSecrets(org, plan, prevState, dry) {
+async function reconcileOrgSecrets(org, plan, prevState, dry, allowOrgSecretDeletes) {
   const prev =
     prevState && typeof prevState === 'object' && !Array.isArray(prevState)
       ? prevState
@@ -2523,6 +2546,16 @@ async function reconcileOrgSecrets(org, plan, prevState, dry) {
   }
   const values = plan ? plan.values : {}
   const policies = plan ? plan.policies : {}
+  const removals = Object.keys(prev).filter(
+    (name) => !Object.prototype.hasOwnProperty.call(policies, name)
+  )
+  if (removals.length && !allowOrgSecretDeletes && !dry) {
+    throw new Error(
+      'refusing to delete organization secret(s) ' +
+      removals.sort().join(', ') +
+      ' without --allow-org-secret-deletes'
+    )
+  }
 
   const newState = {}
   for (const name of Object.keys(policies).sort()) {
@@ -2575,8 +2608,7 @@ async function reconcileOrgSecrets(org, plan, prevState, dry) {
     newState[name] = entry
   }
 
-  for (const name of Object.keys(prev)) {
-    if (Object.prototype.hasOwnProperty.call(policies, name)) continue
+  for (const name of removals) {
     print(dry, 'remove-org-secret', org, name)
     if (!dry) {
       try {
