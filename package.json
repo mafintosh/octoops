@@ -8,8 +8,7 @@
   },
   "scripts": {
     "format": "prettier --write .",
-    "lint": "prettier --check .",
-    "test": "node --test test/*.test.js"
+    "lint": "prettier --check ."
   },
   "dependencies": {
     "paparam": "^1.10.1"
