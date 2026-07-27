@@ -709,6 +709,50 @@ You can also manage the package's npm maintainer list:
 
 Octoops adds anyone in `maintainers` who isn't already an owner and removes anyone who is an owner but not in the list — **except the caller** (whoever ran `octoops apply`). The caller is never removed, even if they're not listed in `maintainers`; you'll see a `npm-keep-self` log line. This prevents you from locking yourself out by mistake.
 
+### PyPI trusted publishing (OIDC)
+
+```json
+{
+  "org": "my-org",
+  "repos": [
+    {
+      "name": "my-lib",
+      "pypi": {
+        "package": "my-lib",
+        "trustedPublishing": {
+          "workflow": "publish.yml",
+          "environment": "pypi"
+        }
+      }
+    }
+  ]
+}
+```
+
+Fields:
+
+- `package` — optional, defaults to the repo name. The PyPI project name.
+- `trustedPublishing.workflow` — required. The GitHub Actions workflow file that publishes (e.g. `publish.yml`).
+- `trustedPublishing.environment` — optional. The deployment environment the workflow uses. Referenced only — octoops does not create it. If you want a protected environment (reviewers etc.), declare it under `environments` as usual; the `pypi` block just names it.
+
+Behavior:
+
+Unlike npm, PyPI has no API token or CLI to create a trusted publisher — it's configured through a logged-in browser session only. So octoops can't reconcile the PyPI side. Instead, apply prints the exact settings to enter once on PyPI (a `pypi-manual` log line) and records the config in state so subsequent applies stay quiet:
+
+```
+pypi-manual my-lib (configure trusted publisher on PyPI)
+    Owner:        my-org
+    Repository:   my-lib
+    Workflow:     publish.yml
+    Environment:  pypi
+    Existing project: https://pypi.org/manage/project/my-lib/settings/publishing/
+    New project:      https://pypi.org/manage/account/publishing/ (add as a "pending publisher")
+```
+
+For a project that already exists on PyPI, add the publisher on its own publishing settings page. For a project that doesn't exist yet, add it as a "pending publisher" on the account page — the first publish then creates the project (no placeholder release needed). For array form (multiple packages from one repo), pass a list of objects like `npm`.
+
+Your workflow needs `permissions: id-token: write` and should use `pypa/gh-action-pypi-publish`. octoops does not manage the workflow file.
+
 ## Programmatic usage
 
 ```js

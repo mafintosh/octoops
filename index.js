@@ -394,6 +394,7 @@ function seed(config, opts = {}) {
     if (repo.environments) entry.environments = repo.environments
     if (repo.rulesets) entry.rulesets = repo.rulesets
     if (repo.npm) entry.npm = repo.npm
+    if (repo.pypi) entry.pypi = repo.pypi
     if (repo.githubPackages) entry.githubPackages = repo.githubPackages
     state[key] = entry
   }
@@ -664,7 +665,8 @@ const PRESET_FIELDS = [
   'branchProtection',
   'environments',
   'rulesets',
-  'npm'
+  'npm',
+  'pypi'
 ]
 
 function resolve(repo, presets) {
@@ -731,7 +733,7 @@ const REPO_KEYS = new Set([
   'merging', 'topics',
   'teams', 'collaborators',
   'branchProtection', 'environments', 'rulesets',
-  'npm', 'secrets', 'security',
+  'npm', 'pypi', 'secrets', 'security',
   'actionsAccess', 'githubPackages',
   'defaults'
 ])
@@ -871,6 +873,7 @@ function repoChanged(repo, prev) {
   if (changed(repo.environments, prev.environments)) return true
   if ((repo.rulesets || prev.rulesets) && changed(repo.rulesets, prev.rulesets)) return true
   if ((repo.npm || prev.npm) && changed(repo.npm, prev.npm)) return true
+  if ((repo.pypi || prev.pypi) && changed(repo.pypi, prev.pypi)) return true
   if ((repo.githubPackages || prev.githubPackages) && changed(repo.githubPackages, prev.githubPackages)) return true
   if (repo.actionsAccess !== undefined && repo.actionsAccess !== prev.actionsAccess) return true
   if (repo.secrets) return true
@@ -1040,6 +1043,12 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     for (const npm of npms) await reconcileNpm(org, repo.name, npm, dry)
   }
   if (repo.npm) done.npm = repo.npm
+
+  if (repo.pypi && changed(repo.pypi, prev.pypi)) {
+    const pypis = Array.isArray(repo.pypi) ? repo.pypi : [repo.pypi]
+    for (const pypi of pypis) reconcilePypi(org, repo.name, pypi, dry)
+  }
+  if (repo.pypi) done.pypi = repo.pypi
 
   if (repo.githubPackages && changed(repo.githubPackages, prev.githubPackages) && current) {
     await reconcileGithubPackages(org, repo.name, repo.githubPackages, dry)
@@ -2297,6 +2306,33 @@ async function reconcileNpmMaintainers(pkg, desired, dry) {
   }
 
   return ok
+}
+
+// PyPI has no token/CLI to create trusted publishers (browser-only), so octoops
+// can't reconcile the PyPI side like it does npm. This prints the exact settings
+// to enter once on PyPI and records intent in state so re-applies stay quiet.
+function reconcilePypi(org, repoName, pypi, dry) {
+  const tp = pypi.trustedPublishing
+  if (!tp) return
+  if (!tp.workflow) {
+    throw new Error('pypi.trustedPublishing.workflow is required for ' + org + '/' + repoName)
+  }
+  const pkg = pypi.package || repoName
+
+  print(dry, 'pypi-manual', pkg, 'configure trusted publisher on PyPI')
+
+  const lines = [
+    '    Owner:        ' + org,
+    '    Repository:   ' + repoName,
+    '    Workflow:     ' + tp.workflow,
+    '    Environment:  ' + (tp.environment || '(none)'),
+    '    Existing project: https://pypi.org/manage/project/' + pkg + '/settings/publishing/',
+    '    New project:      https://pypi.org/manage/account/publishing/ (add as a "pending publisher")'
+  ]
+  for (const line of lines) {
+    console.log(line)
+    audit(line)
+  }
 }
 
 async function getRepo(org, name) {
