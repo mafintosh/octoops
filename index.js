@@ -2174,13 +2174,17 @@ async function reconcileNpm(org, repoName, npm, dry) {
   const pkg = npm.package || npm.name || (npm.scope ? (npm.scope.startsWith('@') ? npm.scope : '@' + npm.scope) + '/' + repoName : repoName)
   const tp = npm.trustedPublishing
 
-  if (!tp && !npm.maintainers) return true
+  if (!tp && !npm.maintainers && npm.deprecated === undefined) return true
 
   await ensureNpmPackage(pkg, dry)
 
   let ok = true
   if (npm.maintainers) {
     ok = await reconcileNpmMaintainers(pkg, npm.maintainers, dry)
+  }
+
+  if (npm.deprecated !== undefined) {
+    await reconcileNpmDeprecation(pkg, npm.deprecated, dry)
   }
 
   if (!tp) return ok
@@ -2306,6 +2310,32 @@ async function reconcileNpmMaintainers(pkg, desired, dry) {
   }
 
   return ok
+}
+
+async function reconcileNpmDeprecation(pkg, deprecated, dry) {
+  const message = deprecated === true ? 'This package is deprecated' : (deprecated || '')
+
+  const res = await run('npm', ['view', pkg, 'deprecated', '--json'], { allowFailure: true })
+  if (res.code !== 0) {
+    if (/404|E404|not found/i.test(res.stderr)) {
+      print(dry, 'skip-deprecate', pkg, 'package not on npm yet, will sync on next apply')
+      return
+    }
+    throw new Error('npm view ' + pkg + ' deprecated failed: ' + res.stderr)
+  }
+
+  let current = ''
+  if (res.stdout) {
+    const parsed = JSON.parse(res.stdout)
+    if (typeof parsed === 'string') current = parsed
+  }
+
+  if (current === message) return
+
+  print(dry, message ? 'npm-deprecate' : 'npm-undeprecate', pkg, message || 'clear deprecation')
+  if (dry) return
+
+  await run('npm', ['deprecate', pkg, message], { interactive: true })
 }
 
 // PyPI has no token/CLI to create trusted publishers (browser-only), so octoops

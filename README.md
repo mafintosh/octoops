@@ -709,6 +709,19 @@ You can also manage the package's npm maintainer list:
 
 Octoops adds anyone in `maintainers` who isn't already an owner and removes anyone who is an owner but not in the list — **except the caller** (whoever ran `octoops apply`). The caller is never removed, even if they're not listed in `maintainers`; you'll see a `npm-keep-self` log line. This prevents you from locking yourself out by mistake.
 
+You can also deprecate a package:
+
+```json
+"npm": {
+  "package": "my-module",
+  "deprecated": "Use @my-org/my-module instead"
+}
+```
+
+- `deprecated` — optional. A string is used as the deprecation message. `true` uses the default message `This package is deprecated`. `false` (or `""`) clears an existing deprecation. Omit it entirely to leave deprecation unmanaged.
+
+Octoops only runs `npm deprecate` when the live message differs from the config, so re-applies stay quiet (`npm-deprecate` / `npm-undeprecate` log lines). If the package isn't on npm yet you'll see a `skip-deprecate` line.
+
 ### PyPI trusted publishing (OIDC)
 
 ```json
