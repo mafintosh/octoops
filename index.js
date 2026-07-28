@@ -828,10 +828,22 @@ function loadConfigInner(configPath, seen) {
   let merged = {}
   for (const ref of refs) {
     const subPath = path.resolve(dir, ref)
-    merged = deepMerge(merged, loadConfigInner(subPath, path2))
+    merged = joinConfigs(merged, loadConfigInner(subPath, path2))
   }
   delete config.extends
-  return deepMerge(merged, config)
+  return joinConfigs(merged, config)
+}
+
+// Combine two configs across an `extends` boundary. Everything deep-merges
+// (overlay wins), except the `presets` and `defaults` maps, which join at the
+// key level: the inner file's value for a given name replaces the parent's
+// wholesale, so an inner preset never inherits stale fields from the parent.
+function joinConfigs(base, overlay) {
+  const out = deepMerge(base, overlay)
+  for (const key of ['presets', 'defaults']) {
+    if (base[key] || overlay[key]) out[key] = { ...base[key], ...overlay[key] }
+  }
+  return out
 }
 
 function deepMerge(base, overlay) {

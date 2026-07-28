@@ -179,7 +179,8 @@ Resolution rules:
 
 - `extends` is a string or array of paths. Paths are relative to the file declaring them.
 - Files are loaded recursively (extended files can extend further). Cycles error.
-- Deep-merge: objects merge per key, arrays/scalars replace. So adding a preset in the leaf adds it to the inherited set; redefining a preset key replaces just that one.
+- Deep-merge: objects merge per key, arrays/scalars replace.
+- The `presets` and `defaults` maps join at the key level — a name defined in the leaf **replaces** the parent's value for that name wholesale (no deep-merge into it), while names only the parent defines are inherited. So you can declare a preset in a base file and fully redefine it in the leaf without inheriting stale fields.
 - The leaf's own fields override the merged base.
 - State files belong to the leaf config (`team-a.state.json`), not the shared file.
 
