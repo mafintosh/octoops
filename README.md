@@ -723,6 +723,8 @@ You can also deprecate a package:
 
 Deprecation is reconciled against the live registry (`npm view … deprecated`) on **every** apply — not gated by recorded/seeded state — so it self-heals if the deprecation is missing or drifted. Octoops only runs `npm deprecate` when the live message actually differs from the config, so matching re-applies stay quiet (`npm-deprecate` / `npm-undeprecate` log lines). If the package isn't on npm yet you'll see a `skip-deprecate` line.
 
+This also works on **archived** repos: the npm registry is independent of GitHub's archive flag, so octoops still reconciles deprecation (and other npm state) even when `archived: true` — deprecating a package while archiving its repo is the common case.
+
 ### PyPI trusted publishing (OIDC)
 
 ```json

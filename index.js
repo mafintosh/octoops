@@ -873,7 +873,13 @@ function npmWantsDeprecation(npm) {
 
 function repoChanged(repo, prev) {
   if (repo.archived && !prev.archived) return true
-  if (repo.archived) return false
+  if (repo.archived) {
+    // Archived repos are frozen on GitHub, but npm lives on the registry —
+    // still reconcile it (e.g. deprecation) even for an archived repo.
+    if ((repo.npm || prev.npm) && changed(repo.npm, prev.npm)) return true
+    if (npmWantsDeprecation(repo.npm)) return true
+    return false
+  }
   if (prev.archived && !repo.archived) return true
   const settings = {}
   const prevSettings = {}
@@ -904,12 +910,17 @@ function repoChanged(repo, prev) {
 async function reconcile(org, repo, prev, dry, done, opts) {
   if (!repoChanged(repo, prev)) return
 
-  if (repo.archived && !prev.archived) {
-    print(dry, 'archive', `${org}/${repo.name}`)
-    if (!dry)
-      await gh(['api', `repos/${org}/${repo.name}`, '--method', 'PATCH', '--input', '-'], {
-        body: { archived: true }
-      })
+  if (repo.archived) {
+    // npm/registry state is independent of GitHub's archive flag, so reconcile
+    // it even here; everything else on an archived repo is read-only, skip it.
+    await reconcileNpmBlock(org, repo, prev, dry, done)
+    if (!prev.archived) {
+      print(dry, 'archive', `${org}/${repo.name}`)
+      if (!dry)
+        await gh(['api', `repos/${org}/${repo.name}`, '--method', 'PATCH', '--input', '-'], {
+          body: { archived: true }
+        })
+    }
     done.archived = true
     return
   }
@@ -1057,12 +1068,7 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     done.rulesets = repo.rulesets
   }
 
-  if (repo.npm) {
-    const npms = Array.isArray(repo.npm) ? repo.npm : [repo.npm]
-    const full = changed(repo.npm, prev.npm)
-    for (const npm of npms) await reconcileNpm(org, repo.name, npm, dry, full)
-    done.npm = repo.npm
-  }
+  await reconcileNpmBlock(org, repo, prev, dry, done)
 
   if (repo.pypi && changed(repo.pypi, prev.pypi)) {
     const pypis = Array.isArray(repo.pypi) ? repo.pypi : [repo.pypi]
@@ -2188,6 +2194,14 @@ async function ensureNpmPackage(pkg, dry) {
   } finally {
     fs.rmSync(tmp, { recursive: true })
   }
+}
+
+async function reconcileNpmBlock(org, repo, prev, dry, done) {
+  if (!repo.npm) return
+  const npms = Array.isArray(repo.npm) ? repo.npm : [repo.npm]
+  const full = changed(repo.npm, prev.npm)
+  for (const npm of npms) await reconcileNpm(org, repo.name, npm, dry, full)
+  done.npm = repo.npm
 }
 
 async function reconcileNpm(org, repoName, npm, dry, full) {
