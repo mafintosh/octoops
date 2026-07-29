@@ -1,6 +1,6 @@
 {
   "name": "octoops",
-  "version": "1.35.0",
+  "version": "1.35.1",
   "description": "Declarative GitHub repo configuration using the gh CLI",
   "main": "index.js",
   "bin": {
