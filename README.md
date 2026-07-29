@@ -721,7 +721,7 @@ You can also deprecate a package:
 
 - `deprecated` — optional. A string is used as the deprecation message. `true` uses the default message `This package is deprecated`. `false` (or `""`) clears an existing deprecation. Omit it entirely to leave deprecation unmanaged.
 
-Octoops only runs `npm deprecate` when the live message differs from the config, so re-applies stay quiet (`npm-deprecate` / `npm-undeprecate` log lines). If the package isn't on npm yet you'll see a `skip-deprecate` line.
+Deprecation is reconciled against the live registry (`npm view … deprecated`) on **every** apply — not gated by recorded/seeded state — so it self-heals if the deprecation is missing or drifted. Octoops only runs `npm deprecate` when the live message actually differs from the config, so matching re-applies stay quiet (`npm-deprecate` / `npm-undeprecate` log lines). If the package isn't on npm yet you'll see a `skip-deprecate` line.
 
 ### PyPI trusted publishing (OIDC)
 

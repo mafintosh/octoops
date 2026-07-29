@@ -865,6 +865,12 @@ function changed(a, b) {
   return JSON.stringify(a) !== JSON.stringify(b)
 }
 
+function npmWantsDeprecation(npm) {
+  if (!npm) return false
+  const npms = Array.isArray(npm) ? npm : [npm]
+  return npms.some((n) => n && n.deprecated !== undefined)
+}
+
 function repoChanged(repo, prev) {
   if (repo.archived && !prev.archived) return true
   if (repo.archived) return false
@@ -885,6 +891,7 @@ function repoChanged(repo, prev) {
   if (changed(repo.environments, prev.environments)) return true
   if ((repo.rulesets || prev.rulesets) && changed(repo.rulesets, prev.rulesets)) return true
   if ((repo.npm || prev.npm) && changed(repo.npm, prev.npm)) return true
+  if (npmWantsDeprecation(repo.npm)) return true // verified against the live registry, not recorded state
   if ((repo.pypi || prev.pypi) && changed(repo.pypi, prev.pypi)) return true
   if ((repo.githubPackages || prev.githubPackages) && changed(repo.githubPackages, prev.githubPackages)) return true
   if (repo.actionsAccess !== undefined && repo.actionsAccess !== prev.actionsAccess) return true
@@ -1050,11 +1057,12 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     done.rulesets = repo.rulesets
   }
 
-  if (repo.npm && changed(repo.npm, prev.npm)) {
+  if (repo.npm) {
     const npms = Array.isArray(repo.npm) ? repo.npm : [repo.npm]
-    for (const npm of npms) await reconcileNpm(org, repo.name, npm, dry)
+    const full = changed(repo.npm, prev.npm)
+    for (const npm of npms) await reconcileNpm(org, repo.name, npm, dry, full)
+    done.npm = repo.npm
   }
-  if (repo.npm) done.npm = repo.npm
 
   if (repo.pypi && changed(repo.pypi, prev.pypi)) {
     const pypis = Array.isArray(repo.pypi) ? repo.pypi : [repo.pypi]
@@ -2182,21 +2190,23 @@ async function ensureNpmPackage(pkg, dry) {
   }
 }
 
-async function reconcileNpm(org, repoName, npm, dry) {
+async function reconcileNpm(org, repoName, npm, dry, full) {
   const pkg = npm.package || npm.name || (npm.scope ? (npm.scope.startsWith('@') ? npm.scope : '@' + npm.scope) + '/' + repoName : repoName)
   const tp = npm.trustedPublishing
 
-  if (!tp && !npm.maintainers && npm.deprecated === undefined) return true
+  // Deprecation reconciles against live registry state (via npm view), not the
+  // recorded state, so it runs on every apply and self-heals even when the npm
+  // block is unchanged — otherwise seeding/recording the block would suppress it.
+  if (npm.deprecated !== undefined) await reconcileNpmDeprecation(pkg, npm.deprecated, dry)
+
+  if (!full) return true
+  if (!tp && !npm.maintainers) return true
 
   await ensureNpmPackage(pkg, dry)
 
   let ok = true
   if (npm.maintainers) {
     ok = await reconcileNpmMaintainers(pkg, npm.maintainers, dry)
-  }
-
-  if (npm.deprecated !== undefined) {
-    await reconcileNpmDeprecation(pkg, npm.deprecated, dry)
   }
 
   if (!tp) return ok
