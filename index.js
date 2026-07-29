@@ -1491,8 +1491,9 @@ async function reconcileApps(org, desired, prev, dry) {
   const bySlug = new Map((installations.installations || installations).map((i) => [i.app_slug, i]))
 
   for (const entry of desired) {
-    const install = bySlug.get(entry.name)
-    if (!install) throw new Error('app "' + entry.name + '" is not installed on ' + org + ' — install it via the UI first')
+    const slug = slugify(entry.name)
+    const install = bySlug.get(slug)
+    if (!install) throw new Error('app "' + entry.name + '" (slug "' + slug + '") is not installed on ' + org + ' — install it via the UI first')
 
     const wantsAll = entry.allRepos === true
     const currentIsAll = install.repository_selection === 'all'

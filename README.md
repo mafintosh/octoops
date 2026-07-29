@@ -335,7 +335,7 @@ Declare which repos each org-installed GitHub App can access. Octoops looks up t
 
 Fields per entry:
 
-- `name` — required, the app's slug (the part after `github.com/apps/`, same one used in ruleset `bypassActors: [{ app: "..." }]`).
+- `name` — required, the app's slug (the part after `github.com/apps/`, same one used in ruleset `bypassActors: [{ app: "..." }]`). You can also give the app's display name — octoops lowercases it and replaces spaces with `-` to match the slug (e.g. `"My App"` → `my-app`).
 - Exactly **one** of:
   - `allRepos: true` — the installation grants access to all current and future repos.
   - `repos: ["..."]` — explicit list of repo names in the org.
