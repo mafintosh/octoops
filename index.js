@@ -2379,6 +2379,7 @@ function reconcilePypi(org, repoName, pypi, dry) {
   print(dry, 'pypi-manual', pkg, 'configure trusted publisher on PyPI')
 
   const lines = [
+    '    Package:      ' + pkg,
     '    Owner:        ' + org,
     '    Repository:   ' + repoName,
     '    Workflow:     ' + tp.workflow,

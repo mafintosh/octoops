@@ -757,6 +757,7 @@ Unlike npm, PyPI has no API token or CLI to create a trusted publisher — it's 
 
 ```
 pypi-manual my-lib (configure trusted publisher on PyPI)
+    Package:      my-lib
     Owner:        my-org
     Repository:   my-lib
     Workflow:     publish.yml
