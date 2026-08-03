@@ -208,7 +208,8 @@ async function importRepo(org, name) {
           .filter((r) => r.type === 'Team')
           .map((r) => ({ team: r.reviewer.name }))
         if (reviewers.length) e.reviewers = reviewers
-        if (env.prevent_self_review) e.preventSelfReview = true
+        const requiredReviewersRule = (env.protection_rules || []).find((r) => r.type === 'required_reviewers')
+        if (requiredReviewersRule && requiredReviewersRule.prevent_self_review) e.preventSelfReview = true
         entry.environments.push(e)
       }
     }
@@ -1867,7 +1868,8 @@ async function reconcileEnvironment(org, repoName, env, dry) {
       .map((r) => r.reviewer.slug)
       .sort()
 
-    const currentPreventSelfReview = current.prevent_self_review === true
+    const requiredReviewersRule = (current.protection_rules || []).find((r) => r.type === 'required_reviewers')
+    const currentPreventSelfReview = (requiredReviewersRule || {}).prevent_self_review === true
 
     if (
       JSON.stringify(currentSlugs) === JSON.stringify([...desiredReviewerSlugs].sort()) &&
