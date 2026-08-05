@@ -317,6 +317,39 @@ Behavior:
 - Apply errors if the package isn't published yet on GitHub Packages — publish it first (e.g. via your trusted-publishing workflow), then octoops can set visibility.
 - No-op when current visibility already matches.
 - Tracked in state on the repo; removing an entry from config leaves the package's visibility untouched (octoops won't flip it back).
+
+### GitHub Pages
+
+Manage a repo's GitHub Pages site by attaching `pages` to the repo entry. Set it to `false` to delete/disable the site, or to an object to create/keep one configured:
+
+```json
+{
+  "repos": [
+    { "name": "my-repo", "pages": false },
+    {
+      "name": "my-tool",
+      "pages": {
+        "source": { "branch": "gh-pages", "path": "/" },
+        "cname": "my-tool.example.com",
+        "httpsEnforced": true
+      }
+    }
+  ]
+}
+```
+
+Fields (object form):
+
+- `source.branch` / `source.path` — required unless `buildType` is `"workflow"`. `path` must be `"/"` or `"/docs"` (GitHub Pages restriction on legacy builds).
+- `buildType` — optional, `"legacy"` (default when `source` is set) or `"workflow"` (build via a GitHub Actions workflow instead — mutually exclusive with `source`).
+- `cname` — optional custom domain.
+- `httpsEnforced` — optional, `true` requires HTTPS for the site. Requires `cname` — HTTPS enforcement only applies to a custom domain, not the default `*.github.io` certificate.
+
+`false` deletes the site (`DELETE /repos/{owner}/{repo}/pages`) if one exists — this still runs even on archived repos (Pages deletion isn't blocked by GitHub's archive restrictions, unlike most other writes). Omitting the key leaves Pages entirely unmanaged.
+
+Setting `cname` and `httpsEnforced: true` together on a brand-new domain may need two applies: GitHub can reject enabling HTTPS until it finishes issuing a certificate for the domain, so octoops sets the `cname` first and retries `httpsEnforced` on the next run if the certificate isn't ready yet.
+
+`octoops import`/`octoops resync` populate `pages` from live state, including `lastBuildStatus` (from the latest Pages build) and `dnsHealthy` (from the Pages health check, only when a `cname` is set) — these two are informational only and are not written back by `apply`.
 - Your gh auth needs `read:packages` and `write:packages` scopes — `gh auth refresh -h github.com -s read:packages,write:packages` if you hit a 403.
 
 ### GitHub Apps installation scope
