@@ -1724,6 +1724,8 @@ async function reconcileOrgTeam(org, team, prevTeam, dry) {
         if (parent) body.parent_team_id = parent.id
       }
       await gh(['api', `orgs/${org}/teams`, '--method', 'POST', '--input', '-'], { body })
+      // the new team slug can 404 on immediately-following calls, give it a moment
+      await new Promise((resolve) => setTimeout(resolve, 2000))
     }
   } else {
     const patch = {}
