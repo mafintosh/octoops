@@ -562,17 +562,6 @@ async function apply(config, opts = {}) {
       await pruneOfflineRunners(config.org, dry)
     }
 
-    if (config.apps || state.apps) {
-      const desiredNormalized = normalizeAppsList(config.apps || [])
-      if (changed(desiredNormalized, state.apps || [])) {
-        await reconcileApps(config.org, config.apps || [], state.apps || [], dry)
-        if (!dry) {
-          state.apps = desiredNormalized
-          if (opts.statePath) saveState(opts.statePath, state)
-        }
-      }
-    }
-
     if (config.teams || state.teams) {
       if (Array.isArray(state.teams)) {
         const migrated = {}
@@ -632,6 +621,18 @@ async function apply(config, opts = {}) {
       } finally {
         if (!dry && Object.keys(done).length) {
           state[key] = Object.assign(prev, done)
+          if (opts.statePath) saveState(opts.statePath, state)
+        }
+      }
+    }
+
+    // after repos — an app can reference a repo created earlier in this apply
+    if (config.apps || state.apps) {
+      const desiredNormalized = normalizeAppsList(config.apps || [])
+      if (changed(desiredNormalized, state.apps || [])) {
+        await reconcileApps(config.org, config.apps || [], state.apps || [], dry)
+        if (!dry) {
+          state.apps = desiredNormalized
           if (opts.statePath) saveState(opts.statePath, state)
         }
       }
@@ -1515,18 +1516,18 @@ async function reconcileApps(org, desired, prev, dry) {
 
     for (const name of entry.repos) {
       if (prevRepos.has(name)) continue
-      const repo = JSON.parse(await gh(['api', `repos/${org}/${name}`]))
       print(dry, 'app-add-repo', `${org}/${entry.name}`, name)
       if (!dry) {
+        const repo = JSON.parse(await gh(['api', `repos/${org}/${name}`]))
         await gh(['api', `user/installations/${install.id}/repositories/${repo.id}`, '--method', 'PUT'])
       }
     }
 
     for (const name of prevRepos) {
       if (desiredSet.has(name)) continue
-      const repo = JSON.parse(await gh(['api', `repos/${org}/${name}`]))
       print(dry, 'app-remove-repo', `${org}/${entry.name}`, name)
       if (!dry) {
+        const repo = JSON.parse(await gh(['api', `repos/${org}/${name}`]))
         try {
           await gh(['api', `user/installations/${install.id}/repositories/${repo.id}`, '--method', 'DELETE'])
         } catch (err) {
