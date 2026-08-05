@@ -216,6 +216,28 @@ async function importRepo(org, name) {
   } catch {}
 
   try {
+    const pages = JSON.parse(await gh(['api', `repos/${org}/${name}/pages`]))
+    const entryPages = { buildType: pages.build_type }
+    if (pages.source) entryPages.source = { branch: pages.source.branch, path: pages.source.path || '/' }
+    if (pages.cname) entryPages.cname = pages.cname
+    if (pages.https_enforced !== undefined) entryPages.httpsEnforced = pages.https_enforced
+
+    try {
+      const build = JSON.parse(await gh(['api', `repos/${org}/${name}/pages/builds/latest`]))
+      entryPages.lastBuildStatus = build.status
+    } catch {}
+
+    if (pages.cname) {
+      try {
+        const health = JSON.parse(await gh(['api', `repos/${org}/${name}/pages/health`]))
+        entryPages.dnsHealthy = !!(health.domain && health.domain.dns_resolves)
+      } catch {}
+    }
+
+    entry.pages = entryPages
+  } catch {}
+
+  try {
     const rulesets = JSON.parse(await gh(['api', `repos/${org}/${name}/rulesets`]))
     if (rulesets.length) {
       entry.rulesets = []
