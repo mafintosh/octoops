@@ -310,7 +310,7 @@ Fields:
 
 - `name` — optional, defaults to the repo name. Use the full package name (with `@scope/` prefix for scoped packages).
 - `visibility` — required, one of `"public"` | `"private"` | `"internal"`.
-- `type` — optional, defaults to `"npm"`. Other types (e.g. `"container"`) work the same way via the same API.
+- `type` — optional, defaults to `"npm"`. One of `npm`, `container`, `docker`, `maven`, `rubygems`, `nuget`. **Docker images published to ghcr.io are `"container"`, not the default `npm`** — if the type is wrong the lookup 404s; octoops then probes the other types and tells you which one to set.
 
 Behavior:
 

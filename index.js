@@ -1440,6 +1440,22 @@ async function listHostedRunnerImages(org) {
   return [...(github.images || []), ...(partner.images || [])]
 }
 
+const PACKAGE_TYPES = ['npm', 'container', 'docker', 'maven', 'rubygems', 'nuget']
+
+// on a 404, probe the other package types so we can tell the user which one to
+// set (e.g. a docker image lives under "container", not the default "npm")
+async function findPackageTypes(org, encoded, skip) {
+  const found = []
+  for (const t of PACKAGE_TYPES) {
+    if (t === skip) continue
+    try {
+      await gh(['api', `orgs/${org}/packages/${t}/${encoded}`])
+      found.push(t)
+    } catch {}
+  }
+  return found
+}
+
 async function reconcileGithubPackages(org, repoName, desired, dry) {
   const entries = Array.isArray(desired) ? desired : [desired]
   for (const entry of entries) {
@@ -1455,6 +1471,10 @@ async function reconcileGithubPackages(org, repoName, desired, dry) {
       current = JSON.parse(await gh(['api', `orgs/${org}/packages/${type}/${encoded}`]))
     } catch (err) {
       if (/Not Found|HTTP 404/i.test(err.message)) {
+        const others = await findPackageTypes(org, encoded, type)
+        if (others.length) {
+          throw new Error('package ' + name + ' is published as "' + others.join('", "') + '" on org ' + org + ', not "' + type + '" — set "type": "' + others[0] + '" in the githubPackages entry')
+        }
         throw new Error('package ' + name + ' (' + type + ') not published on GitHub Packages for org ' + org + ' — publish it before setting visibility')
       }
       throw err
