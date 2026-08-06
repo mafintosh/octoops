@@ -1480,12 +1480,12 @@ async function reconcileGithubPackages(org, repoName, desired, dry) {
       throw err
     }
     if (current.visibility === entry.visibility) continue
-    print(dry, 'package-visibility', `${org}/${name}`, current.visibility + ' -> ' + entry.visibility)
-    if (!dry) {
-      await gh(['api', `orgs/${org}/packages/${type}/${encoded}`, '--method', 'PATCH', '--input', '-'], {
-        body: { visibility: entry.visibility }
-      })
-    }
+    // GitHub has no REST API to change package visibility — it's web-UI only,
+    // so print the exact setting to flip instead of a doomed PATCH.
+    print(dry, 'package-visibility-manual', `${org}/${name}`, current.visibility + ' -> ' + entry.visibility)
+    const hint = '    Set it in the UI: https://github.com/orgs/' + org + '/packages/' + type + '/' + encoded + '/settings (Danger Zone → Change visibility)'
+    console.log(hint)
+    audit(hint)
   }
 }
 

@@ -286,7 +286,7 @@ These map to GitHub's `*_enabled_for_new_repositories` fields on the org setting
 
 ### GitHub Packages visibility
 
-Set the visibility of a repo's GitHub Packages by attaching `githubPackages` to the repo entry. Accepts a single object or an array:
+Track the desired visibility of a repo's GitHub Packages by attaching `githubPackages` to the repo entry. Accepts a single object or an array:
 
 ```json
 {
@@ -314,10 +314,11 @@ Fields:
 
 Behavior:
 
-- Apply errors if the package isn't published yet on GitHub Packages — publish it first (e.g. via your trusted-publishing workflow), then octoops can set visibility.
+- **GitHub has no REST API to change package visibility — it's web-UI only.** So octoops can't flip it for you: when the live visibility differs from config it prints a `package-visibility-manual` line with the exact settings URL (Package settings → Danger Zone → Change visibility) for you to click once. It does detect and report the drift.
+- Apply errors if the package isn't published yet on GitHub Packages — publish it first (e.g. via your trusted-publishing workflow).
 - No-op when current visibility already matches.
-- Tracked in state on the repo; removing an entry from config leaves the package's visibility untouched (octoops won't flip it back).
-- Your gh auth needs `read:packages` and `write:packages` scopes — `gh auth refresh -h github.com -s read:packages,write:packages` if you hit a 403.
+- Tracked in state on the repo; removing an entry from config leaves the package's visibility untouched.
+- Your gh auth needs `read:packages` to read the current visibility — `gh auth refresh -h github.com -s read:packages` if you hit a 403.
 
 ### GitHub Apps installation scope
 
