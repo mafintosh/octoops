@@ -208,10 +208,33 @@ async function importRepo(org, name) {
           .filter((r) => r.type === 'Team')
           .map((r) => ({ team: r.reviewer.name }))
         if (reviewers.length) e.reviewers = reviewers
-        if (env.prevent_self_review) e.preventSelfReview = true
+        const requiredReviewersRule = (env.protection_rules || []).find((r) => r.type === 'required_reviewers')
+        if (requiredReviewersRule && requiredReviewersRule.prevent_self_review) e.preventSelfReview = true
         entry.environments.push(e)
       }
     }
+  } catch {}
+
+  try {
+    const pages = JSON.parse(await gh(['api', `repos/${org}/${name}/pages`]))
+    const entryPages = { buildType: pages.build_type }
+    if (pages.source) entryPages.source = { branch: pages.source.branch, path: pages.source.path || '/' }
+    if (pages.cname) entryPages.cname = pages.cname
+    if (pages.https_enforced !== undefined) entryPages.httpsEnforced = pages.https_enforced
+
+    try {
+      const build = JSON.parse(await gh(['api', `repos/${org}/${name}/pages/builds/latest`]))
+      entryPages.lastBuildStatus = build.status
+    } catch {}
+
+    if (pages.cname) {
+      try {
+        const health = JSON.parse(await gh(['api', `repos/${org}/${name}/pages/health`]))
+        entryPages.dnsHealthy = !!(health.domain && health.domain.dns_resolves)
+      } catch {}
+    }
+
+    entry.pages = entryPages
   } catch {}
 
   try {
@@ -735,7 +758,7 @@ const REPO_KEYS = new Set([
   'teams', 'collaborators',
   'branchProtection', 'environments', 'rulesets',
   'npm', 'pypi', 'secrets', 'security',
-  'actionsAccess', 'githubPackages',
+  'actionsAccess', 'githubPackages', 'pages',
   'defaults'
 ])
 
@@ -893,6 +916,7 @@ function repoChanged(repo, prev) {
   if ((repo.npm || prev.npm) && changed(repo.npm, prev.npm)) return true
   if ((repo.pypi || prev.pypi) && changed(repo.pypi, prev.pypi)) return true
   if ((repo.githubPackages || prev.githubPackages) && changed(repo.githubPackages, prev.githubPackages)) return true
+  if ((repo.pages !== undefined || prev.pages !== undefined) && changed(repo.pages, prev.pages)) return true
   if (repo.actionsAccess !== undefined && repo.actionsAccess !== prev.actionsAccess) return true
   if (repo.secrets) return true
   if (repo.environments && repo.environments.some((e) => e.secrets)) return true
@@ -907,6 +931,10 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     // npm/registry state is independent of GitHub's archive flag, so reconcile
     // it even here; everything else on an archived repo is read-only, skip it.
     await reconcileNpmBlock(org, repo, prev, dry, done)
+    if (repo.pages === false) {
+      await reconcilePages(org, repo.name, false, dry)
+      done.pages = false
+    }
     if (!prev.archived) {
       print(dry, 'archive', `${org}/${repo.name}`)
       if (!dry)
@@ -1001,6 +1029,11 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     await reconcileActionsAccess(org, repo.name, repo.actionsAccess, dry)
   }
   if (repo.actionsAccess !== undefined) done.actionsAccess = repo.actionsAccess
+
+  if (repo.pages !== undefined && current && changed(repo.pages, prev.pages)) {
+    await reconcilePages(org, repo.name, repo.pages, dry)
+  }
+  if (repo.pages !== undefined) done.pages = repo.pages
 
   if (repo.topics && current && changed(repo.topics, prev.topics)) {
     await reconcileTopics(org, repo.name, repo.topics, dry)
@@ -1870,7 +1903,8 @@ async function reconcileEnvironment(org, repoName, env, dry) {
       .map((r) => r.reviewer.slug)
       .sort()
 
-    const currentPreventSelfReview = current.prevent_self_review === true
+    const requiredReviewersRule = (current.protection_rules || []).find((r) => r.type === 'required_reviewers')
+    const currentPreventSelfReview = (requiredReviewersRule || {}).prevent_self_review === true
 
     if (
       JSON.stringify(currentSlugs) === JSON.stringify([...desiredReviewerSlugs].sort()) &&
@@ -1898,6 +1932,97 @@ async function reconcileEnvironment(org, repoName, env, dry) {
       body: { reviewers, prevent_self_review: desiredPreventSelfReview }
     }
   )
+}
+
+async function getPages(org, name) {
+  try {
+    return JSON.parse(await gh(['api', `repos/${org}/${name}/pages`]))
+  } catch (err) {
+    if (/Not Found/.test(err.message)) return null
+    throw err
+  }
+}
+
+async function reconcilePages(org, name, desired, dry) {
+  const current = await getPages(org, name)
+
+  if (desired === false) {
+    if (!current) return
+    print(dry, 'delete-pages', `${org}/${name}`)
+    if (!dry) {
+      try {
+        await gh(['api', `repos/${org}/${name}/pages`, '--method', 'DELETE'])
+      } catch (err) {
+        if (!/Not Found/.test(err.message)) throw err
+      }
+    }
+    return
+  }
+
+  if (desired.buildType !== 'workflow' && !desired.source) {
+    throw new Error(`${org}/${name}: pages.source is required unless buildType is "workflow"`)
+  }
+  if (desired.source && !['/', '/docs'].includes(desired.source.path || '/')) {
+    throw new Error(`${org}/${name}: pages.source.path must be "/" or "/docs" (GitHub Pages restriction)`)
+  }
+  if (desired.httpsEnforced !== undefined && !desired.cname) {
+    throw new Error(`${org}/${name}: pages.httpsEnforced requires cname — HTTPS enforcement only applies to a custom domain, not the default *.github.io certificate`)
+  }
+
+  const buildType = desired.buildType || 'legacy'
+  const body = { build_type: buildType }
+  if (buildType === 'legacy') {
+    body.source = { branch: desired.source.branch, path: desired.source.path || '/' }
+  }
+  if (desired.cname !== undefined) body.cname = desired.cname
+  if (desired.httpsEnforced !== undefined) body.https_enforced = desired.httpsEnforced
+
+  if (!current) {
+    print(dry, 'create-pages', `${org}/${name}`, buildType)
+    if (!dry) await gh(['api', `repos/${org}/${name}/pages`, '--method', 'POST', '--input', '-'], { body })
+    return
+  }
+
+  const currentShape = {
+    build_type: current.build_type,
+    source:
+      current.source && buildType === 'legacy'
+        ? { branch: current.source.branch, path: current.source.path || '/' }
+        : undefined,
+    cname: current.cname || undefined,
+    // https_enforced defaults to true on GitHub's side even when never set by us —
+    // only compare it when the config actually manages it, or an unmanaged repo
+    // would show a spurious diff (unset vs GitHub's default `true`) on every run.
+    https_enforced: desired.httpsEnforced !== undefined ? current.https_enforced : undefined
+  }
+  const desiredShape = {
+    build_type: buildType,
+    source: body.source,
+    cname: desired.cname,
+    https_enforced: desired.httpsEnforced
+  }
+  if (!changed(desiredShape, currentShape)) return
+
+  print(dry, 'update-pages', `${org}/${name}`, buildType)
+  if (dry) return
+
+  // Setting cname and httpsEnforced together can 422 if GitHub hasn't finished
+  // issuing the cert for a brand-new custom domain yet — split into two PUTs
+  // so the cname (and build_type/source) still lands even if https lags behind.
+  if (desired.cname !== undefined && desired.httpsEnforced === true && current.cname !== desired.cname) {
+    const { https_enforced, ...withoutHttps } = body
+    await gh(['api', `repos/${org}/${name}/pages`, '--method', 'PUT', '--input', '-'], { body: withoutHttps })
+    try {
+      await gh(['api', `repos/${org}/${name}/pages`, '--method', 'PUT', '--input', '-'], {
+        body: { https_enforced: true }
+      })
+    } catch (err) {
+      print(dry, 'skip-pages-https', `${org}/${name}`, 'cert not ready yet, will retry next apply')
+    }
+    return
+  }
+
+  await gh(['api', `repos/${org}/${name}/pages`, '--method', 'PUT', '--input', '-'], { body })
 }
 
 async function reconcileRulesets(org, repoName, desired, prev, dry) {
