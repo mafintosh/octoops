@@ -2194,10 +2194,14 @@ async function ensureNpmPackage(pkg, dry) {
 
 async function reconcileNpmBlock(org, repo, prev, dry, done) {
   if (!repo.npm) return
+  if (changed(repo.npm, prev.npm)) {
+    const npms = Array.isArray(repo.npm) ? repo.npm : [repo.npm]
+    for (const npm of npms) await reconcileNpm(org, repo.name, npm, dry)
+  }
+  // record only after the work succeeded — if reconcileNpm threw (e.g. npm
+  // publish failed because not logged in) we leave state unchanged so the
+  // next apply retries instead of assuming it's done
   done.npm = repo.npm
-  if (!changed(repo.npm, prev.npm)) return // unchanged vs state — do nothing
-  const npms = Array.isArray(repo.npm) ? repo.npm : [repo.npm]
-  for (const npm of npms) await reconcileNpm(org, repo.name, npm, dry)
 }
 
 async function reconcileNpm(org, repoName, npm, dry) {
