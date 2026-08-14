@@ -1793,8 +1793,13 @@ async function reconcileOrgTeam(org, team, prevTeam, dry) {
   for (const [username] of prevMap) {
     if (desiredMap.has(username)) continue
     print(dry, 'remove-team-member', `${org}/${slug}`, username)
-    if (!dry)
-      await gh(['api', `orgs/${org}/teams/${slug}/memberships/${username}`, '--method', 'DELETE'])
+    if (!dry) {
+      try {
+        await gh(['api', `orgs/${org}/teams/${slug}/memberships/${username}`, '--method', 'DELETE'])
+      } catch (err) {
+        if (!/Not Found|Cannot find/.test(err.message)) throw err
+      }
+    }
   }
 }
 
