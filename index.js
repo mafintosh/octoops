@@ -659,6 +659,78 @@ function saveState(statePath, state) {
   fs.writeFileSync(statePath, JSON.stringify(state, null, 2) + '\n')
 }
 
+const PRESET_REF = /^\$([\w.-]+)$/
+
+// The general way to use a preset: any string of the form "$name" anywhere in
+// the config resolves to presets.name, however deeply nested. A ref sitting in
+// an array spreads if it resolves to an array. Presets can reference other
+// presets. "$$foo" escapes to a literal "$foo".
+function expandPresets(config) {
+  const presets = config.presets
+  if (!presets) return config
+
+  const cache = new Map()
+  const out = {}
+
+  for (const key of Object.keys(config)) {
+    if (key !== 'presets') {
+      out[key] = expand(config[key], key, new Set())
+      continue
+    }
+    const map = {}
+    for (const name of Object.keys(presets)) map[name] = lookup(name, new Set())
+    out.presets = map
+  }
+
+  return out
+
+  function lookup(name, seen) {
+    if (cache.has(name)) return cache.get(name)
+    if (seen.has(name)) throw new Error('preset cycle at "' + name + '"')
+    const path = new Set(seen)
+    path.add(name)
+    const value = expand(presets[name], 'presets.' + name, path)
+    cache.set(name, value)
+    return value
+  }
+
+  function expand(value, at, seen) {
+    if (typeof value === 'string') {
+      if (value.startsWith('$$')) return value.slice(1)
+      const match = value.match(PRESET_REF)
+      if (!match) return value
+      const name = match[1]
+      if (!(name in presets)) {
+        throw new Error(
+          'unknown preset "' + name + '" at ' + at + suggest(name, Object.keys(presets), null)
+        )
+      }
+      return lookup(name, seen)
+    }
+
+    if (Array.isArray(value)) {
+      const list = []
+      for (let i = 0; i < value.length; i++) {
+        const item = expand(value[i], at + '[' + i + ']', seen)
+        const spread = typeof value[i] === 'string' && PRESET_REF.test(value[i]) && Array.isArray(item)
+        if (spread) list.push(...item)
+        else list.push(item)
+      }
+      return list
+    }
+
+    if (value && typeof value === 'object') {
+      const obj = {}
+      for (const key of Object.keys(value)) obj[key] = expand(value[key], at + '.' + key, seen)
+      return obj
+    }
+
+    return value
+  }
+}
+
+// Older style: a bare string in one of these repo fields is a preset name. Kept
+// for compat, prefer "$name" refs which work on any field.
 const PRESET_FIELDS = [
   'merging',
   'teams',
@@ -791,7 +863,7 @@ function editDistance(a, b) {
 }
 
 function loadConfig(configPath) {
-  return loadConfigInner(path.resolve(configPath), new Set())
+  return expandPresets(loadConfigInner(path.resolve(configPath), new Set()))
 }
 
 function expandIncludes(configPath) {

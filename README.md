@@ -85,7 +85,7 @@ Respects GitHub API rate limits automatically.
       "private": true,
       "merging": { "squashOnly": true, "deleteBranchOnMerge": true },
       "topics": ["nodejs"],
-      "teams": "standard-teams",
+      "teams": "$standard-teams",
       "branchProtection": [
         { "branch": "main", "enforceAdmins": true, "requiredReviews": { "approvals": 1 } }
       ],
@@ -106,21 +106,35 @@ Respects GitHub API rate limits automatically.
 }
 ```
 
-Any repo field that accepts an object or array can be a string instead, referencing a key in `presets`. Supported fields: `merging`, `teams`, `topics`, `branchProtection`, `environments`, `rulesets`, `npm`. This lets you define a config once and reuse it across repos.
+### Presets
 
-For array fields you can also mix preset references with inline objects element-by-element:
+Any string of the form `"$name"` — anywhere in the config, at any depth — resolves to the `presets` entry called `name`. This lets you define something once and reuse it across repos, teams, environments, rulesets, whatever:
 
 ```json
 "presets": {
+  "reviewers": [{ "team": "release" }, { "team": "devops" }],
   "integrity": { "name": "integrity", "preventForcePush": true },
   "tags": { "name": "tags", "target": "tag", "preventCreation": true }
 },
 "repos": [
-  { "name": "api", "rulesets": ["integrity", "tags", { "name": "ad-hoc", "preventDeletion": true }] }
+  {
+    "name": "api",
+    "rulesets": ["$integrity", "$tags", { "name": "ad-hoc", "preventDeletion": true }],
+    "environments": [{ "name": "production", "reviewers": "$reviewers" }]
+  }
 ]
 ```
 
-Each string element is looked up in `presets` (it can resolve to a single object or an array — arrays are spread). Inline objects pass through unchanged.
+- A ref can resolve to any JSON value — string, number, object, array
+- A ref inside an array is spread if it resolves to an array, so `["$reviewers", { "team": "sre" }]` becomes the two preset entries followed by `{ "team": "sre" }`. Inline values pass through unchanged
+- Presets can reference other presets. Cycles are an error
+- An unknown ref is an error (with a did-you-mean suggestion), so typos fail at load instead of reaching GitHub. Refs are only resolved when the config has a `presets` map at all
+- Only whole strings are refs — `"costs $5"` is left alone. Write `"$$name"` for a literal string starting with `$name`
+- Refs are resolved once, after all `extends` files are merged, so a base file can declare a preset and a leaf file reference it. They work inside `defaults` entries, `teams`, `security`, `runnerGroups` — anywhere, not just under `repos`
+
+#### Older style
+
+Before `$refs`, presets were referenced with a bare string in one of a fixed set of repo fields: `merging`, `teams`, `topics`, `branchProtection`, `environments`, `rulesets`, `npm`, `pypi`. That still works — `"teams": "standard-teams"` and `"rulesets": ["integrity", "tags"]` resolve as before — but new configs should use `"$standard-teams"` and `["$integrity", "$tags"]`, which work on every field.
 
 ### Repo settings
 
@@ -201,12 +215,12 @@ Define named defaults at the top level and let repos opt in via `defaults: "name
     "service": {
       "extends": "base",
       "teams": [{ "name": "backend", "permission": "write" }],
-      "rulesets": "default-rules"
+      "rulesets": "$default-rules"
     },
     "oss-module": {
       "extends": "base",
       "private": false,
-      "rulesets": "oss-rules"
+      "rulesets": "$oss-rules"
     }
   },
   "repos": [
@@ -226,7 +240,7 @@ Resolution rules:
 - Arrays and scalars replace.
 - Repo fields override the resolved defaults.
 - Cycles or unknown names are an error.
-- After defaults are applied, preset resolution runs as usual (so `rulesets: "default-rules"` still resolves through `presets`).
+- `$refs` inside a defaults entry are already resolved by the time it is merged, and old-style bare-string presets still resolve after the merge (so `rulesets: "default-rules"` keeps working too).
 
 Example with mixin composition:
 
@@ -529,9 +543,9 @@ GitHub flags this API as beta — the parameter shape may change on their side.
     ]
   },
   "repos": [
-    { "name": "api", "private": true, "rulesets": "default-rules" },
-    { "name": "web", "private": true, "rulesets": "default-rules" },
-    { "name": "docs", "private": false, "rulesets": "default-rules" }
+    { "name": "api", "private": true, "rulesets": "$default-rules" },
+    { "name": "web", "private": true, "rulesets": "$default-rules" },
+    { "name": "docs", "private": false, "rulesets": "$default-rules" }
   ]
 }
 ```
@@ -557,16 +571,16 @@ GitHub flags this API as beta — the parameter shape may change on their side.
     {
       "name": "module-a",
       "private": false,
-      "merging": "oss-merging",
-      "rulesets": "oss-protection"
+      "merging": "$oss-merging",
+      "rulesets": "$oss-protection"
     },
     {
       "name": "module-b",
       "private": false,
-      "merging": "oss-merging",
-      "rulesets": "oss-protection"
+      "merging": "$oss-merging",
+      "rulesets": "$oss-protection"
     },
-    { "name": "module-c", "private": false, "merging": "oss-merging", "rulesets": "oss-protection" }
+    { "name": "module-c", "private": false, "merging": "$oss-merging", "rulesets": "$oss-protection" }
   ]
 }
 ```
