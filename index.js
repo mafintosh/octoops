@@ -443,6 +443,7 @@ async function renameRepo(configPath, from, to, opts = {}) {
 }
 
 async function resync(config, opts = {}) {
+  const previousState = loadState(opts.statePath)
   const importOpts = {}
   const only = []
   if (config.admins || config.members) only.push('members')
@@ -468,7 +469,11 @@ async function resync(config, opts = {}) {
     fresh.teams = fresh.teams.filter((t) => keep.has(t.name))
   }
 
-  if (opts.statePath) saveState(opts.statePath, {})
+  if (opts.statePath) {
+    const preservedState = {}
+    if (previousState.orgSecrets) preservedState.orgSecrets = previousState.orgSecrets
+    saveState(opts.statePath, preservedState)
+  }
   seed(fresh, opts)
 }
 
@@ -476,6 +481,8 @@ async function apply(config, opts = {}) {
   const dry = opts.dry === true
   if (config.enterprise) opts = { ...opts, enterprise: true }
   validateConfig(config)
+  const configDir = opts.configPath ? path.dirname(opts.configPath) : null
+  const orgSecretsPlan = prepareOrgSecrets(config.orgSecrets, configDir)
   const state = loadState(opts.statePath)
 
   if (opts.audit) {
@@ -530,6 +537,21 @@ async function apply(config, opts = {}) {
       await reconcileOrgSecurity(config.org, config.security, dry)
       if (!dry) {
         state.security = config.security
+        if (opts.statePath) saveState(opts.statePath, state)
+      }
+    }
+
+    if (config.orgSecrets || state.orgSecrets) {
+      const next = await reconcileOrgSecrets(
+        config.org,
+        orgSecretsPlan,
+        state.orgSecrets,
+        dry,
+        opts.allowOrgSecretDeletes === true
+      )
+      if (!dry && next !== null) {
+        if (Object.keys(next).length) state.orgSecrets = next
+        else delete state.orgSecrets
         if (opts.statePath) saveState(opts.statePath, state)
       }
     }
@@ -796,7 +818,7 @@ const ROOT_KEYS = new Set([
   'presets', 'defaults',
   'repos', 'teams', 'admins', 'members',
   'security', 'runnerGroups', 'hostedRunners', 'pruneOfflineRunners',
-  'apps'
+  'apps', 'orgSecrets'
 ])
 
 const REPO_KEYS = new Set([
@@ -819,6 +841,7 @@ function validateConfig(config) {
   for (const k of Object.keys(config)) {
     if (!ROOT_KEYS.has(k)) console.error('warning: unknown property "' + k + '" at config root' + suggest(k, ROOT_KEYS, null))
   }
+  if (config.orgSecrets !== undefined) validateOrgSecrets(config.orgSecrets)
   for (const raw of config.repos || []) {
     for (const k of Object.keys(raw)) {
       if (!REPO_KEYS.has(k)) console.error('warning: unknown property "' + k + '" on repo "' + (raw.name || '?') + '"' + suggest(k, REPO_KEYS, REPO_ALIASES))
@@ -830,6 +853,83 @@ function validateConfig(config) {
       if (!DEFAULTS_KEYS.has(k)) console.error('warning: unknown property "' + k + '" on defaults "' + name + '"' + suggest(k, DEFAULTS_KEYS, null))
     }
   }
+}
+
+function validateOrgSecrets(config) {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    throw new Error('orgSecrets must be an object')
+  }
+  for (const key of Object.keys(config)) {
+    if (key !== 'file' && key !== 'secrets') {
+      throw new Error('unknown property "' + key + '" on orgSecrets')
+    }
+  }
+  if (typeof config.file !== 'string' || !config.file.trim()) {
+    throw new Error('orgSecrets.file must be a non-empty string')
+  }
+  if (!config.secrets || typeof config.secrets !== 'object' || Array.isArray(config.secrets)) {
+    throw new Error('orgSecrets.secrets must be an object')
+  }
+  for (const [name, policy] of Object.entries(config.secrets)) {
+    normalizeOrgSecretPolicy(name, policy)
+  }
+}
+
+function normalizeOrgSecretPolicy(name, policy) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || /^GITHUB_/i.test(name)) {
+    throw new Error('invalid organization secret name "' + name + '"')
+  }
+  if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
+    throw new Error('policy for organization secret "' + name + '" must be an object')
+  }
+  for (const key of Object.keys(policy)) {
+    if (key !== 'visibility' && key !== 'repos') {
+      throw new Error('unknown property "' + key + '" on organization secret "' + name + '"')
+    }
+  }
+  if (!['all', 'private', 'selected'].includes(policy.visibility)) {
+    throw new Error(
+      'invalid visibility for organization secret "' +
+      name +
+      '" (expected all|private|selected)'
+    )
+  }
+
+  if (policy.visibility !== 'selected') {
+    if (policy.repos !== undefined) {
+      throw new Error(
+        'repos is only valid with selected visibility for organization secret "' + name + '"'
+      )
+    }
+    return { visibility: policy.visibility }
+  }
+
+  if (!Array.isArray(policy.repos) || !policy.repos.length) {
+    throw new Error(
+      'selected organization secret "' + name + '" must list at least one repo'
+    )
+  }
+  const repos = []
+  const seen = new Set()
+  for (const raw of policy.repos) {
+    if (typeof raw !== 'string' || !raw.trim() || raw.includes('/')) {
+      throw new Error(
+        'invalid repo for selected organization secret "' +
+        name +
+        '" (expected a repository name without an owner)'
+      )
+    }
+    const repo = raw.trim().toLowerCase()
+    if (seen.has(repo)) {
+      throw new Error(
+        'duplicate repo "' + raw.trim() + '" for selected organization secret "' + name + '"'
+      )
+    }
+    seen.add(repo)
+    repos.push(repo)
+  }
+  repos.sort()
+  return { visibility: 'selected', repos }
 }
 
 function suggest(unknown, allowed, aliases) {
@@ -875,7 +975,7 @@ function expandIncludesInner(configPath, seen) {
   const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
   if (!raw.includes) return [configPath]
 
-  const FORBIDDEN = ['org', 'repos', 'teams', 'admins', 'members', 'security', 'runnerGroups', 'hostedRunners', 'pruneOfflineRunners', 'enterprise', 'extends', 'presets', 'defaults']
+  const FORBIDDEN = ['org', 'repos', 'teams', 'admins', 'members', 'security', 'runnerGroups', 'hostedRunners', 'pruneOfflineRunners', 'enterprise', 'extends', 'presets', 'defaults', 'orgSecrets']
   for (const k of FORBIDDEN) {
     if (k in raw) throw new Error('manifest ' + configPath + ' has both "includes" and "' + k + '" — manifests are orchestration-only')
   }
@@ -2541,12 +2641,183 @@ function parseSecretsFile(filePath) {
   return out
 }
 
+function parseOrgSecretsFile(filePath) {
+  const text = fs.readFileSync(filePath, 'utf-8')
+  const out = {}
+  const lines = text.split(/\r?\n/)
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eq = line.indexOf('=')
+    if (eq === -1) continue
+    const key = line.slice(0, eq).trim()
+    if (!key) continue
+    let value = line.slice(eq + 1).trim()
+
+    if (value.startsWith('"') || value.startsWith("'")) {
+      const quote = value[0]
+      let quoted = value.slice(1)
+      while (true) {
+        const closing = findClosingQuote(quoted, quote)
+        if (closing !== -1) {
+          const trailing = quoted.slice(closing + 1).trim()
+          if (trailing && !trailing.startsWith('#')) {
+            throw new Error('unexpected characters after quoted secret "' + key + '"')
+          }
+          value = quoted.slice(0, closing)
+          break
+        }
+        if (++i >= lines.length) {
+          throw new Error('unterminated quoted secret "' + key + '"')
+        }
+        quoted += '\n' + lines[i]
+      }
+      if (quote === '"') value = unescapeDoubleQuotedSecret(value)
+    }
+    out[key] = value
+  }
+  return out
+}
+
+function findClosingQuote(value, quote) {
+  for (let i = 0; i < value.length; i++) {
+    if (value[i] !== quote) continue
+    let slashes = 0
+    for (let j = i - 1; j >= 0 && value[j] === '\\'; j--) slashes++
+    if (slashes % 2 === 0) return i
+  }
+  return -1
+}
+
+function unescapeDoubleQuotedSecret(value) {
+  const escapes = { n: '\n', r: '\r', t: '\t', '"': '"', '\\': '\\' }
+  return value.replace(/\\([nrt"\\])/g, (_, escaped) => escapes[escaped])
+}
+
 function hashSecret(salt, value) {
   return crypto.createHmac('sha256', Buffer.from(salt, 'hex')).update(value).digest('hex')
 }
 
 function randSalt() {
   return crypto.randomBytes(32).toString('hex')
+}
+
+function prepareOrgSecrets(config, configDir) {
+  if (!config) return undefined
+
+  const filePath = path.resolve(configDir || '.', config.file)
+  if (!fs.existsSync(filePath)) {
+    return { missing: true, file: config.file }
+  }
+
+  const values = parseOrgSecretsFile(filePath)
+  const policies = {}
+  for (const name of Object.keys(config.secrets)) {
+    policies[name] = normalizeOrgSecretPolicy(name, config.secrets[name])
+    if (!Object.prototype.hasOwnProperty.call(values, name)) {
+      throw new Error(
+        'organization secret "' + name + '" is declared but missing from ' + config.file
+      )
+    }
+  }
+  for (const name of Object.keys(values)) {
+    if (!Object.prototype.hasOwnProperty.call(policies, name)) {
+      throw new Error(
+        'organization secret "' + name + '" is present in ' +
+        config.file +
+        ' but has no policy'
+      )
+    }
+  }
+  return { values, policies }
+}
+
+async function reconcileOrgSecrets(org, plan, prevState, dry, allowOrgSecretDeletes) {
+  const prev =
+    prevState && typeof prevState === 'object' && !Array.isArray(prevState)
+      ? prevState
+      : {}
+  if (plan && plan.missing) {
+    print(dry, 'skip-org-secrets', org, 'file missing: ' + plan.file)
+    return null
+  }
+  const values = plan ? plan.values : {}
+  const policies = plan ? plan.policies : {}
+  const removals = Object.keys(prev).filter(
+    (name) => !Object.prototype.hasOwnProperty.call(policies, name)
+  )
+  if (removals.length && !allowOrgSecretDeletes && !dry) {
+    throw new Error(
+      'refusing to delete organization secret(s) ' +
+      removals.sort().join(', ') +
+      ' without --allow-org-secret-deletes'
+    )
+  }
+
+  const newState = {}
+  for (const name of Object.keys(policies).sort()) {
+    const value = values[name]
+    const policy = policies[name]
+    const prevEntry = prev[name]
+    const valueMatches =
+      prevEntry &&
+      typeof prevEntry === 'object' &&
+      typeof prevEntry.salt === 'string' &&
+      typeof prevEntry.hmac === 'string' &&
+      hashSecret(prevEntry.salt, value) === prevEntry.hmac
+    const policyMatches =
+      valueMatches &&
+      prevEntry.visibility === policy.visibility &&
+      JSON.stringify(prevEntry.repos || []) === JSON.stringify(policy.repos || [])
+
+    if (policyMatches) {
+      newState[name] = prevEntry
+      continue
+    }
+
+    const detail =
+      name +
+      ' visibility=' +
+      policy.visibility +
+      (policy.repos ? ' repos=' + policy.repos.join(',') : '')
+    print(dry, 'set-org-secret', org, detail)
+    if (!dry) {
+      const args = [
+        'secret',
+        'set',
+        name,
+        '--org',
+        org,
+        '--visibility',
+        policy.visibility
+      ]
+      if (policy.repos) args.push('--repos', policy.repos.join(','))
+      await gh(args, { rawBody: value })
+    }
+
+    const salt = valueMatches ? prevEntry.salt : randSalt()
+    const entry = {
+      salt,
+      hmac: valueMatches ? prevEntry.hmac : hashSecret(salt, value),
+      visibility: policy.visibility
+    }
+    if (policy.repos) entry.repos = policy.repos
+    newState[name] = entry
+  }
+
+  for (const name of removals) {
+    print(dry, 'remove-org-secret', org, name)
+    if (!dry) {
+      try {
+        await gh(['secret', 'delete', name, '--org', org])
+      } catch (err) {
+        if (!/Not Found/i.test(err.message)) throw err
+      }
+    }
+  }
+
+  return newState
 }
 
 async function reconcileSecrets(org, name, file, prevState, dry, envName, configDir) {

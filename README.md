@@ -14,6 +14,7 @@ npm install -g octoops
 octoops apply config.json
 octoops apply --dry-run config.json
 octoops apply --audit config.json
+octoops apply --allow-org-secret-deletes config.json
 ```
 
 Import an existing org into a config file:
@@ -448,7 +449,86 @@ Each entry in `environments` supports:
 ]
 ```
 
-### Secrets
+### Organization Actions secrets
+
+Organization-level Actions secrets can use a different repository visibility policy for each
+secret. Values stay in a local dotenv file; the JSON config contains names and access policy
+only:
+
+```json
+{
+  "org": "my-org",
+  "orgSecrets": {
+    "file": ".org-secrets",
+    "secrets": {
+      "RELEASE_FOR_SELECTED_REPOS": {
+        "visibility": "selected",
+        "repos": ["api", "web"]
+      },
+      "DEPLOY_FOR_PRIVATE_REPOS": { "visibility": "private" },
+      "CI_FOR_EVERY_REPO": { "visibility": "all" }
+    }
+  }
+}
+```
+
+`visibility` is required for every declared secret:
+
+- `selected` — only the repository names listed in `repos`; at least one bare repository name
+  is required
+- `private` — every private repository in the organization
+- `all` — every repository in the organization, **including public repositories**. Prefer
+  `selected` or `private` unless the secret is intentionally shared org-wide (for example a
+  shared registry credential). Anyone who can push a workflow to an in-scope repo can read an
+  `all` secret.
+
+The value file must contain exactly the names declared under `orgSecrets.secrets`:
+
+```dotenv
+CI_FOR_EVERY_REPO=dummy-or-real-value
+DEPLOY_FOR_PRIVATE_REPOS="another value"
+RELEASE_FOR_SELECTED_REPOS=release-value
+```
+
+Behavior:
+
+- The value-file path resolves relative to the config file. If it is missing, octoops prints
+  `skip-org-secrets` and leaves existing secrets and state untouched.
+- Organization secret values support quoted multiline content. Double-quoted `\n`, `\r`, `\t`,
+  `\"`, and `\\` escapes are decoded, so a PEM private key can use literal newlines or escaped
+  `\n` sequences. Repository and environment secrets keep the older single-line quoting rules.
+- Values are sent to `gh secret set` over stdin and never appear in command arguments or logs.
+- State contains a per-secret salted HMAC plus normalized visibility policy, never plaintext.
+  The state file is still sensitive: low-entropy secret values remain offline brute-forceable
+  from the stored salt and HMAC, so treat `*.state.json` like a secrets artifact when values
+  may be weak.
+- A value, visibility, or selected-repository change updates only that secret. Repository names
+  are normalized and sorted before comparison. GitHub stores selected-repository access by
+  repository ID; octoops tracks the configured names. A rename done outside octoops (instead of
+  `octoops rename`) can leave desired names and live access silently out of sync until the next
+  `set` with a stale name fails or the config is updated.
+- Removing a secret from both the policy and value file deletes it from GitHub. Removing the
+  entire `orgSecrets` block deletes every organization secret previously managed in that state
+  file. Both deletion paths require `octoops apply --allow-org-secret-deletes` (or the API
+  equivalent `allowOrgSecretDeletes: true`). Missing or rotated state alone does not delete
+  secrets; deletions only happen when previous managed secrets remain in state and are no longer
+  desired.
+- A value without a policy, or a policy without a value, is rejected before GitHub is changed.
+- `import` and `resync` cannot recover organization secret values because GitHub never returns
+  them. `seed` preserves hashes already present in the state file.
+
+Managing organization secrets requires an organization owner and a GitHub CLI token with the
+`admin:org` scope:
+
+```bash
+gh auth refresh -h github.com -s admin:org
+```
+
+Organization secrets are not available to private repositories on GitHub Free; a paid
+organization plan is required for `private` visibility and for private repositories selected
+with `selected`.
+
+### Repository and environment secrets
 
 Reference a local dotenv-style file from a repo or environment:
 
@@ -462,7 +542,7 @@ Reference a local dotenv-style file from a repo or environment:
 }
 ```
 
-File format (`KEY=value`, `#` comments, optional quoting):
+File format (`KEY=value`, `#` comments, optional single-line quoting):
 
 ```
 NPM_TOKEN=abc123
@@ -475,9 +555,10 @@ Behavior:
 
 - Paths resolve relative to the config file
 - Missing file → octoops prints `skip-secrets` and leaves existing secrets/state alone (so you can `.gitignore` the secrets file and only run apply where it's present)
-- Each secret is hashed with a per-secret HMAC-SHA256 salt (`[salt, hmac]`); state never holds plaintext, and hashes can't be correlated across secrets/repos/state files
+- Each secret is hashed with a per-secret HMAC-SHA256 salt (`[salt, hmac]`); state never holds plaintext, and hashes can't be correlated across secrets/repos/state files. Low-entropy values remain offline brute-forceable if the state file leaks.
 - Only secrets whose value changed are PUT to GitHub; secrets removed from the file are deleted from GitHub
 - Values are sent to `gh secret set` over stdin (never on the command line, never logged)
+- Quoting only strips matching edge quotes on a single line; escape sequences like `\n` are left literal
 
 ### Ruleset fields
 
