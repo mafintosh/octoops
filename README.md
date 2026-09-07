@@ -148,6 +148,7 @@ Top-level repo fields for basic settings:
 - `wiki: true|false` — enable/disable repo wiki
 - `projects: true|false` — enable/disable repo projects
 - `archived: true` — archive the repo (skips further reconcile). Removing this from the config (when state has it) unarchives the repo
+- `delete: true` — delete the repo on GitHub and drop it from state. Must be set on the repo entry itself (ignored on defaults packs). Removing a repo from the config does **not** delete it. A 404 (already gone) is treated as success. After apply, remove the entry from the config
 - `init: true` — initialize the repo with a README so the default branch exists. On create, passes `--add-readme` to `gh repo create`. On an existing empty repo (no branches), creates `README.md` retroactively. Once initialized, recorded in state and not re-checked
 - `actionsAccess` — `"none"` | `"organization"` | `"enterprise"`. Controls which other repos' GitHub Actions workflows can access this repo's actions and reusable workflows (Settings → Actions → General → Access). Only relevant for private repos.
 - `template` — overloaded by type:
