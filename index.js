@@ -613,8 +613,18 @@ async function apply(config, opts = {}) {
     }
 
     for (const raw of config.repos || []) {
+      const key = config.org + '/' + raw.name
+      if (raw.delete === true) {
+        if (!raw.name) throw new Error('repo delete requires a "name"')
+        await deleteRepo(config.org, raw.name, dry)
+        if (!dry) {
+          delete state[key]
+          if (opts.statePath) saveState(opts.statePath, state)
+        }
+        continue
+      }
+
       const repo = resolve(resolveDefaults(raw, config.defaults), presets)
-      const key = config.org + '/' + repo.name
       const prev = state[key] || {}
       const done = {}
       try {
@@ -810,7 +820,7 @@ const ROOT_KEYS = new Set([
 const REPO_KEYS = new Set([
   'name', 'description', 'homepage',
   'private', 'internal',
-  'defaultBranch', 'wiki', 'projects', 'archived', 'init', 'template',
+  'defaultBranch', 'wiki', 'projects', 'archived', 'delete', 'init', 'template',
   'merging', 'topics',
   'teams', 'collaborators',
   'branchProtection', 'environments', 'rulesets',
@@ -820,6 +830,7 @@ const REPO_KEYS = new Set([
 ])
 
 const DEFAULTS_KEYS = new Set([...REPO_KEYS, 'extends'])
+DEFAULTS_KEYS.delete('delete')
 
 const REPO_ALIASES = { extends: 'defaults', inherits: 'defaults' }
 
@@ -835,6 +846,10 @@ function validateConfig(config) {
   for (const name of Object.keys(config.defaults || {})) {
     const entry = config.defaults[name]
     for (const k of Object.keys(entry || {})) {
+      if (k === 'delete') {
+        console.error('warning: "delete" on defaults "' + name + '" is ignored — set it on the repo entry')
+        continue
+      }
       if (!DEFAULTS_KEYS.has(k)) console.error('warning: unknown property "' + k + '" on defaults "' + name + '"' + suggest(k, DEFAULTS_KEYS, null))
     }
   }
@@ -2534,6 +2549,17 @@ async function getRepo(org, name) {
     return JSON.parse(await gh(['api', `repos/${org}/${name}`]))
   } catch {
     return null
+  }
+}
+
+async function deleteRepo(org, name, dry) {
+  print(dry, 'delete', `${org}/${name}`)
+  if (dry) return
+  try {
+    await gh(['api', `repos/${org}/${name}`, '--method', 'DELETE'])
+  } catch (err) {
+    if (!/Not Found/.test(err.message)) throw err
+    print(false, 'skip-delete', `${org}/${name}`, 'already gone')
   }
 }
 
