@@ -150,6 +150,7 @@ Top-level repo fields for basic settings:
 - `archived: true` — archive the repo (skips further reconcile). Removing this from the config (when state has it) unarchives the repo
 - `init: true` — initialize the repo with a README so the default branch exists. On create, passes `--add-readme` to `gh repo create`. On an existing empty repo (no branches), creates `README.md` retroactively. Once initialized, recorded in state and not re-checked
 - `actionsAccess` — `"none"` | `"organization"` | `"enterprise"`. Controls which other repos' GitHub Actions workflows can access this repo's actions and reusable workflows (Settings → Actions → General → Access). Only relevant for private repos.
+- `forkPrContributorApproval` — `"all_external_contributors"` | `"first_time_contributors"` | `"first_time_contributors_new_to_github"`. Controls who must wait for approval before GitHub Actions runs on fork pull requests (Settings → Actions → General → Fork pull request workflows from outside collaborators).
 - `template` — overloaded by type:
   - `"owner/repo"` — create the repo *from* a template repo. Only used at create time. Mutually exclusive with `init` (templates already have content).
   - `true` / `false` — mark this repo *as* a template (so others can "Use this template"). Settable on existing repos via the settings PATCH.
