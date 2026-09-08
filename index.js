@@ -141,6 +141,13 @@ async function importRepo(org, name) {
     if (access.access_level && access.access_level !== 'none') entry.actionsAccess = access.access_level
   } catch {}
 
+  try {
+    const forkPr = JSON.parse(await gh(['api', `repos/${org}/${name}/actions/permissions/fork-pr-contributor-approval`]))
+    if (forkPr.approval_policy && forkPr.approval_policy !== 'first_time_contributors_new_to_github') {
+      entry.forkPrContributorApproval = forkPr.approval_policy
+    }
+  } catch {}
+
   if (repo.security_and_analysis) {
     const sa = repo.security_and_analysis
     const sec = {}
@@ -386,6 +393,7 @@ function seed(config, opts = {}) {
     if (repo.projects !== undefined) entry.projects = repo.projects
     if (typeof repo.template === 'boolean') entry.template = repo.template
     if (repo.actionsAccess !== undefined) entry.actionsAccess = repo.actionsAccess
+    if (repo.forkPrContributorApproval !== undefined) entry.forkPrContributorApproval = repo.forkPrContributorApproval
     if (repo.security) entry.security = repo.security
     if (repo.topics) entry.topics = repo.topics
     if (repo.teams) entry.teams = repo.teams
@@ -807,7 +815,7 @@ const REPO_KEYS = new Set([
   'teams', 'collaborators',
   'branchProtection', 'environments', 'rulesets',
   'npm', 'pypi', 'secrets', 'security',
-  'actionsAccess', 'githubPackages',
+  'actionsAccess', 'forkPrContributorApproval', 'githubPackages',
   'defaults'
 ])
 
@@ -966,6 +974,7 @@ function repoChanged(repo, prev) {
   if ((repo.pypi || prev.pypi) && changed(repo.pypi, prev.pypi)) return true
   if ((repo.githubPackages || prev.githubPackages) && changed(repo.githubPackages, prev.githubPackages)) return true
   if (repo.actionsAccess !== undefined && repo.actionsAccess !== prev.actionsAccess) return true
+  if (repo.forkPrContributorApproval !== undefined && repo.forkPrContributorApproval !== prev.forkPrContributorApproval) return true
   if (repo.secrets) return true
   if (repo.environments && repo.environments.some((e) => e.secrets)) return true
   if (repo.init && !prev.initialized) return true
@@ -1073,6 +1082,11 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     await reconcileActionsAccess(org, repo.name, repo.actionsAccess, dry)
   }
   if (repo.actionsAccess !== undefined) done.actionsAccess = repo.actionsAccess
+
+  if (repo.forkPrContributorApproval !== undefined && current && repo.forkPrContributorApproval !== prev.forkPrContributorApproval) {
+    await reconcileForkPrContributorApproval(org, repo.name, repo.forkPrContributorApproval, dry)
+  }
+  if (repo.forkPrContributorApproval !== undefined) done.forkPrContributorApproval = repo.forkPrContributorApproval
 
   if (repo.topics && current && changed(repo.topics, prev.topics)) {
     await reconcileTopics(org, repo.name, repo.topics, dry)
@@ -1275,6 +1289,24 @@ async function reconcileActionsAccess(org, name, level, dry) {
   if (!dry) {
     await gh(['api', `repos/${org}/${name}/actions/permissions/access`, '--method', 'PUT', '--input', '-'], {
       body: { access_level: level }
+    })
+  }
+}
+
+const FORK_PR_APPROVAL_POLICIES = [
+  'all_external_contributors',
+  'first_time_contributors',
+  'first_time_contributors_new_to_github'
+]
+
+async function reconcileForkPrContributorApproval(org, name, policy, dry) {
+  if (!FORK_PR_APPROVAL_POLICIES.includes(policy)) {
+    throw new Error('invalid forkPrContributorApproval "' + policy + '" for ' + org + '/' + name + ' (expected ' + FORK_PR_APPROVAL_POLICIES.join('|') + ')')
+  }
+  print(dry, 'fork-pr-approval', `${org}/${name}`, policy)
+  if (!dry) {
+    await gh(['api', `repos/${org}/${name}/actions/permissions/fork-pr-contributor-approval`, '--method', 'PUT', '--input', '-'], {
+      body: { approval_policy: policy }
     })
   }
 }
