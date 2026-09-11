@@ -133,6 +133,36 @@ Any string of the form `"$name"` — anywhere in the config, at any depth — re
 - Only whole strings are refs — `"costs $5"` is left alone. Write `"$$name"` for a literal string starting with `$name`
 - Refs are resolved once, after all `extends` files are merged, so a base file can declare a preset and a leaf file reference it. They work inside `defaults` entries, `teams`, `security`, `runnerGroups` — anywhere, not just under `repos`
 
+#### Repo-local presets
+
+A repo entry can also carry its own `presets` map. Those presets are only visible inside that entry, so a one-off value stays next to the repo that uses it instead of cluttering the root map:
+
+```json
+"presets": {
+  "reviewers": [{ "team": "release" }]
+},
+"repos": [
+  {
+    "name": "api",
+    "presets": {
+      "reviewers": [{ "team": "api-owners" }],
+      "envs": ["production", "staging"]
+    },
+    "environments": [{ "name": "$envs", "reviewers": "$reviewers" }]
+  },
+  {
+    "name": "web",
+    "environments": [{ "name": "production", "reviewers": "$reviewers" }]
+  }
+]
+```
+
+- A local preset shadows a root preset of the same name, so `$reviewers` is `api-owners` inside `api` and `release` everywhere else
+- Local presets can reference root presets and other local presets, and the same spread and fan-out rules apply. Cycles are an error
+- Other repos and the root config cannot see a repo's local presets — referencing one from elsewhere is an unknown-preset error
+- Local presets work even when the config has no root `presets` map
+- The `presets` map is removed from the entry once resolved, so it never reaches GitHub. Local presets are `$ref`-only; the older bare-string style below only looks at the root map
+
 #### Older style
 
 Before `$refs`, presets were referenced with a bare string in one of a fixed set of repo fields: `merging`, `teams`, `topics`, `branchProtection`, `environments`, `rulesets`, `npm`, `pypi`. That still works — `"teams": "standard-teams"` and `"rulesets": ["integrity", "tags"]` resolve as before — but new configs should use `"$standard-teams"` and `["$integrity", "$tags"]`, which work on every field.

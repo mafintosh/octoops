@@ -678,53 +678,82 @@ const FANOUT_KEYS = new Set(['team', 'username', 'app'])
 // the config resolves to presets.name, however deeply nested. A ref sitting in
 // an array spreads if it resolves to an array. Presets can reference other
 // presets. "$$foo" escapes to a literal "$foo".
+//
+// A repo entry can carry its own `presets` map. Those are only visible inside
+// that entry, shadow the root presets of the same name, and may reference
+// root presets. The map is stripped from the entry once expanded.
 function expandPresets(config) {
-  const presets = config.presets
-  if (!presets) return config
+  const repos = Array.isArray(config.repos) ? config.repos : null
+  const hasLocal = repos !== null && repos.some((r) => r && typeof r === 'object' && r.presets)
+  if (!config.presets && !hasLocal) return config
 
-  const cache = new Map()
+  const root = createScope(config.presets || {}, null, 'presets')
   const out = {}
 
   for (const key of Object.keys(config)) {
-    if (key !== 'presets') {
-      out[key] = expand(config[key], key, new Set())
-      continue
+    if (key === 'presets') {
+      const map = {}
+      for (const name of Object.keys(root.presets)) map[name] = lookup(name, root, new Set())
+      out.presets = map
+    } else if (key === 'repos' && repos) {
+      out.repos = repos.map((raw, i) => expandRepo(raw, 'repos[' + i + ']'))
+    } else {
+      out[key] = expand(config[key], key, root, new Set())
     }
-    const map = {}
-    for (const name of Object.keys(presets)) map[name] = lookup(name, new Set())
-    out.presets = map
   }
 
   return out
 
-  function lookup(name, seen) {
-    if (cache.has(name)) return cache.get(name)
-    if (seen.has(name)) throw new Error('preset cycle at "' + name + '"')
+  function createScope(presets, parent, at) {
+    return { presets, parent, at, cache: new Map() }
+  }
+
+  function expandRepo(raw, at) {
+    if (!raw || typeof raw !== 'object' || !raw.presets) return expand(raw, at, root, new Set())
+    const local = createScope(raw.presets, root, at + '.presets')
+    const { presets, ...rest } = raw
+    return expand(rest, at, local, new Set())
+  }
+
+  function has(name, scope) {
+    for (let s = scope; s; s = s.parent) if (name in s.presets) return true
+    return false
+  }
+
+  function names(scope) {
+    const all = new Set()
+    for (let s = scope; s; s = s.parent) for (const name of Object.keys(s.presets)) all.add(name)
+    return all
+  }
+
+  function lookup(name, scope, seen) {
+    while (!(name in scope.presets)) scope = scope.parent
+    if (scope.cache.has(name)) return scope.cache.get(name)
+    const at = scope.at + '.' + name
+    if (seen.has(at)) throw new Error('preset cycle at "' + name + '"')
     const path = new Set(seen)
-    path.add(name)
-    const value = expand(presets[name], 'presets.' + name, path)
-    cache.set(name, value)
+    path.add(at)
+    const value = expand(scope.presets[name], at, scope, path)
+    scope.cache.set(name, value)
     return value
   }
 
-  function expand(value, at, seen) {
+  function expand(value, at, scope, seen) {
     if (typeof value === 'string') {
       if (value.startsWith('$$')) return value.slice(1)
       const match = value.match(PRESET_REF)
       if (!match) return value
       const name = match[1]
-      if (!(name in presets)) {
-        throw new Error(
-          'unknown preset "' + name + '" at ' + at + suggest(name, Object.keys(presets), null)
-        )
+      if (!has(name, scope)) {
+        throw new Error('unknown preset "' + name + '" at ' + at + suggest(name, names(scope), null))
       }
-      return lookup(name, seen)
+      return lookup(name, scope, seen)
     }
 
     if (Array.isArray(value)) {
       const list = []
       for (let i = 0; i < value.length; i++) {
-        const item = expand(value[i], at + '[' + i + ']', seen)
+        const item = expand(value[i], at + '[' + i + ']', scope, seen)
         const spread = typeof value[i] === 'string' && PRESET_REF.test(value[i]) && Array.isArray(item)
         if (spread) list.push(...item)
         else list.push(...fanout(value[i], item, at + '[' + i + ']'))
@@ -734,7 +763,7 @@ function expandPresets(config) {
 
     if (value && typeof value === 'object') {
       const obj = {}
-      for (const key of Object.keys(value)) obj[key] = expand(value[key], at + '.' + key, seen)
+      for (const key of Object.keys(value)) obj[key] = expand(value[key], at + '.' + key, scope, seen)
       return obj
     }
 
@@ -836,7 +865,7 @@ const REPO_KEYS = new Set([
   'branchProtection', 'environments', 'rulesets',
   'npm', 'pypi', 'secrets', 'security',
   'actionsAccess', 'forkPrContributorApproval', 'githubPackages',
-  'defaults'
+  'defaults', 'presets'
 ])
 
 const DEFAULTS_KEYS = new Set([...REPO_KEYS, 'extends'])
