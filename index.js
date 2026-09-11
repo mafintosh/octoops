@@ -669,6 +669,11 @@ function saveState(statePath, state) {
 
 const PRESET_REF = /^\$([\w.-]+)$/
 
+// Object fields that are always a single actor. An object in an array with one
+// of these set to a $ref that resolves to an array fans out into one copy per
+// element, so { team: "$publishers" } becomes one reviewer entry per team.
+const FANOUT_KEYS = new Set(['team', 'username', 'app'])
+
 // The general way to use a preset: any string of the form "$name" anywhere in
 // the config resolves to presets.name, however deeply nested. A ref sitting in
 // an array spreads if it resolves to an array. Presets can reference other
@@ -722,7 +727,7 @@ function expandPresets(config) {
         const item = expand(value[i], at + '[' + i + ']', seen)
         const spread = typeof value[i] === 'string' && PRESET_REF.test(value[i]) && Array.isArray(item)
         if (spread) list.push(...item)
-        else list.push(item)
+        else list.push(...fanout(value[i], item, at + '[' + i + ']'))
       }
       return list
     }
@@ -734,6 +739,21 @@ function expandPresets(config) {
     }
 
     return value
+  }
+
+  function fanout(raw, item, at) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [item]
+
+    let key = null
+    for (const k of Object.keys(raw)) {
+      if (!FANOUT_KEYS.has(k)) continue
+      if (typeof raw[k] !== 'string' || !PRESET_REF.test(raw[k]) || !Array.isArray(item[k])) continue
+      if (key) throw new Error('multiple fan-out fields "' + key + '" and "' + k + '" at ' + at)
+      key = k
+    }
+    if (!key) return [item]
+
+    return item[key].map((v) => ({ ...item, [key]: v }))
   }
 }
 

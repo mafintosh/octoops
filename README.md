@@ -127,6 +127,7 @@ Any string of the form `"$name"` — anywhere in the config, at any depth — re
 
 - A ref can resolve to any JSON value — string, number, object, array
 - A ref inside an array is spread if it resolves to an array, so `["$reviewers", { "team": "sre" }]` becomes the two preset entries followed by `{ "team": "sre" }`. Inline values pass through unchanged
+- An object inside an array fans out if its `team`, `username` or `app` field is a ref that resolves to an array. With `"publishers": ["release", "devops"]`, `"reviewers": [{ "team": "$publishers" }]` becomes `[{ "team": "release" }, { "team": "devops" }]`, and any other fields on the object (`mode`, `filePatterns`, `minApprovals`, ...) are copied onto every entry. A ref resolving to a single string stays one entry, so a preset can switch between one and several teams without touching the repos that use it. Only these three fields fan out, so refs on array-valued fields like `filePatterns` substitute as usual
 - Presets can reference other presets. Cycles are an error
 - An unknown ref is an error (with a did-you-mean suggestion), so typos fail at load instead of reaching GitHub. Refs are only resolved when the config has a `presets` map at all
 - Only whole strings are refs — `"costs $5"` is left alone. Write `"$$name"` for a literal string starting with `$name`
