@@ -14,6 +14,9 @@ const PERMISSIONS = {
 
 module.exports = { apply, importOrg, seed, filter, resync, loadConfig, renameRepo, expandIncludes }
 
+const MERGE_QUEUE_METHODS = new Set(['MERGE', 'SQUASH', 'REBASE'])
+const MERGE_QUEUE_GROUPINGS = new Set(['ALLGREEN', 'HEADGREEN'])
+
 const PERMISSIONS_REVERSE = {
   pull: 'read',
   push: 'write',
@@ -283,6 +286,17 @@ async function importRepo(org, name) {
             })
             if (rule.parameters.do_not_enforce_on_create) {
               r.doNotEnforceWorkflowsOnCreate = true
+            }
+          }
+          if (rule.type === 'merge_queue' && rule.parameters) {
+            r.mergeQueue = {
+              mergeMethod: rule.parameters.merge_method,
+              groupingStrategy: rule.parameters.grouping_strategy,
+              checkResponseTimeout: rule.parameters.check_response_timeout_minutes,
+              maxEntriesToBuild: rule.parameters.max_entries_to_build,
+              maxEntriesToMerge: rule.parameters.max_entries_to_merge,
+              minEntriesToMerge: rule.parameters.min_entries_to_merge,
+              minEntriesToMergeWait: rule.parameters.min_entries_to_merge_wait_minutes
             }
           }
         }
@@ -2256,6 +2270,43 @@ async function buildRulesetBody(org, ruleset) {
           repository_id: w.repositoryId,
           ref: w.ref || 'main'
         }))
+      }
+    })
+  }
+
+  if (ruleset.mergeQueue) {
+    const mq = ruleset.mergeQueue === true ? {} : ruleset.mergeQueue
+    const mergeMethod = mq.mergeMethod || 'MERGE'
+    const groupingStrategy = mq.groupingStrategy || 'ALLGREEN'
+
+    if (!MERGE_QUEUE_METHODS.has(mergeMethod)) {
+      throw new Error(
+        'ruleset "' + ruleset.name + '": mergeQueue.mergeMethod must be one of ' +
+          [...MERGE_QUEUE_METHODS].join(', ') + ' (got "' + mergeMethod + '")'
+      )
+    }
+    if (!MERGE_QUEUE_GROUPINGS.has(groupingStrategy)) {
+      throw new Error(
+        'ruleset "' + ruleset.name + '": mergeQueue.groupingStrategy must be one of ' +
+          [...MERGE_QUEUE_GROUPINGS].join(', ') + ' (got "' + groupingStrategy + '")'
+      )
+    }
+    if ((ruleset.target || 'branch') !== 'branch') {
+      throw new Error('ruleset "' + ruleset.name + '": mergeQueue is only valid on branch rulesets')
+    }
+
+    // Every parameter is required by the API, so unset ones get GitHub's own
+    // defaults rather than being omitted.
+    rules.push({
+      type: 'merge_queue',
+      parameters: {
+        merge_method: mergeMethod,
+        grouping_strategy: groupingStrategy,
+        check_response_timeout_minutes: mq.checkResponseTimeout || 60,
+        max_entries_to_build: mq.maxEntriesToBuild || 5,
+        max_entries_to_merge: mq.maxEntriesToMerge || 5,
+        min_entries_to_merge: mq.minEntriesToMerge || 1,
+        min_entries_to_merge_wait_minutes: mq.minEntriesToMergeWait || 5
       }
     })
   }

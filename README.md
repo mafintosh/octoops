@@ -531,7 +531,62 @@ Each entry in `rulesets` supports:
 - `filePathRestrictions: ["..."]` — glob restrictions on which file paths can change
 - `requiredWorkflows: [{ path, repositoryId, ref }]` — required GitHub Actions workflows
 - `doNotEnforceWorkflowsOnCreate: true` — skip enforcing `requiredWorkflows` when a branch/tag is created (defaults to `false`)
+- `mergeQueue` — require a merge queue on the branch. `true` accepts every default, or pass an object to tune it. Branch rulesets only. See "Merge queue" below
 - `bypassActors: [...]` — entries: `{ team }`, `{ username }`, `{ app }` (GitHub App slug, e.g. `"dependabot"`), or `{ type: "OrganizationAdmin" }`, each with optional `mode: "always"|"pull_request"`
+
+#### Merge queue
+
+`mergeQueue` requires pull requests to merge through GitHub's merge queue. The queue tests each
+entry against the tip of the base branch plus everything ahead of it, so it gives the same
+guarantee as `requiredStatusChecks.strict` without making authors rebase and re-run CI whenever
+someone else merges first.
+
+`true` takes every default:
+
+```json
+{ "name": "main", "include": ["~DEFAULT_BRANCH"], "mergeQueue": true }
+```
+
+Or tune it:
+
+```json
+{
+  "name": "main",
+  "include": ["~DEFAULT_BRANCH"],
+  "requiredStatusChecks": { "strict": true, "checks": ["ci / build"] },
+  "mergeQueue": {
+    "mergeMethod": "SQUASH",
+    "groupingStrategy": "ALLGREEN",
+    "checkResponseTimeout": 60,
+    "maxEntriesToBuild": 5,
+    "maxEntriesToMerge": 5,
+    "minEntriesToMerge": 1,
+    "minEntriesToMergeWait": 5
+  }
+}
+```
+
+- `mergeMethod` — `"MERGE"` (default), `"SQUASH"`, or `"REBASE"`. `"MERGE"` conflicts with
+  `requireLinearHistory`, since a merge commit is not linear
+- `groupingStrategy` — `"ALLGREEN"` (default) requires every merge commit in a group to pass its
+  required checks; `"HEADGREEN"` requires only the commit at the head of the group. `ALLGREEN` is
+  safer and costs more CI
+- `checkResponseTimeout` — minutes to wait for a required check to report a conclusion before
+  assuming it failed (default `60`). Set this above your slowest required check or healthy pull
+  requests get dequeued
+- `maxEntriesToBuild` — how many queued entries may run checks at once (default `5`)
+- `minEntriesToMerge` / `maxEntriesToMerge` — group size bounds (defaults `1` and `5`)
+- `minEntriesToMergeWait` — minutes to wait for `minEntriesToMerge` to be met before merging a
+  smaller group anyway (default `5`)
+
+Required status checks must be triggerable by the `merge_group` event, otherwise they never report
+against the queue's temporary ref and every entry stalls until `checkResponseTimeout` elapses:
+
+```yaml
+on:
+  pull_request:
+  merge_group:
+```
 
 #### Required reviewers (beta)
 
