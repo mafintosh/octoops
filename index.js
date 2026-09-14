@@ -134,6 +134,7 @@ async function importRepo(org, name) {
 
   if (repo.has_wiki === false) entry.wiki = false
   if (repo.has_projects === false) entry.projects = false
+  if (repo.has_issues === false) entry.issues = false
   if (repo.is_template === true) entry.template = true
 
   try {
@@ -391,6 +392,7 @@ function seed(config, opts = {}) {
     if (repo.merging) entry.merging = repo.merging
     if (repo.wiki !== undefined) entry.wiki = repo.wiki
     if (repo.projects !== undefined) entry.projects = repo.projects
+    if (repo.issues !== undefined) entry.issues = repo.issues
     if (typeof repo.template === 'boolean') entry.template = repo.template
     if (repo.actionsAccess !== undefined) entry.actionsAccess = repo.actionsAccess
     if (repo.forkPrContributorApproval !== undefined) entry.forkPrContributorApproval = repo.forkPrContributorApproval
@@ -859,7 +861,7 @@ const ROOT_KEYS = new Set([
 const REPO_KEYS = new Set([
   'name', 'description', 'homepage',
   'private', 'internal',
-  'defaultBranch', 'wiki', 'projects', 'archived', 'init', 'template',
+  'defaultBranch', 'wiki', 'projects', 'issues', 'archived', 'init', 'template',
   'merging', 'topics',
   'teams', 'collaborators',
   'branchProtection', 'environments', 'rulesets',
@@ -1006,7 +1008,7 @@ function repoChanged(repo, prev) {
   if (prev.archived && !repo.archived) return true
   const settings = {}
   const prevSettings = {}
-  for (const k of ['description', 'homepage', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'security', 'template']) {
+  for (const k of ['description', 'homepage', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'issues', 'security', 'template']) {
     if (repo[k] === undefined) continue
     if (k === 'template' && typeof repo[k] !== 'boolean') continue
     settings[k] = repo[k]
@@ -1099,7 +1101,7 @@ async function reconcile(org, repo, prev, dry, done, opts) {
 
   const settings = {}
   const prevSettings = {}
-  for (const k of ['description', 'homepage', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'security', 'template']) {
+  for (const k of ['description', 'homepage', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'issues', 'security', 'template']) {
     if (repo[k] === undefined) continue
     if (k === 'template' && typeof repo[k] !== 'boolean') continue
     settings[k] = repo[k]
@@ -1117,6 +1119,7 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   if (repo.merging) done.merging = repo.merging
   if (repo.wiki !== undefined) done.wiki = repo.wiki
   if (repo.projects !== undefined) done.projects = repo.projects
+  if (repo.issues !== undefined) done.issues = repo.issues
   if (typeof repo.template === 'boolean') done.template = repo.template
   if (repo.security) done.security = repo.security
 
@@ -1238,6 +1241,7 @@ async function reconcileSettings(org, repo, dry, prev = {}) {
   if (repo.defaultBranch) patch.default_branch = repo.defaultBranch
   if (repo.wiki !== undefined) patch.has_wiki = repo.wiki
   if (repo.projects !== undefined) patch.has_projects = repo.projects
+  if (repo.issues !== undefined) patch.has_issues = repo.issues
   if (typeof repo.template === 'boolean') patch.is_template = repo.template
   if (repo.merging) {
     const m = repo.merging
