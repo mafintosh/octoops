@@ -10,6 +10,10 @@ const applyCmd = command(
   flag('--dry-run|-n', 'Show what would change without making changes'),
   flag('--audit', 'Write an audit log to audits/<timestamp>.log'),
   flag('--enterprise', 'Enable enterprise features (env reviewers on private repos)'),
+  flag(
+    '--allow-org-secret-deletes',
+    'Allow deleting organization secrets removed from orgSecrets or the entire block'
+  ),
   arg('<config>', 'Path to config JSON file or manifest with "includes"'),
   async function () {
     const root = path.resolve(applyCmd.args.config)
@@ -24,7 +28,8 @@ const applyCmd = command(
         statePath,
         configPath,
         audit: applyCmd.flags.audit,
-        enterprise: applyCmd.flags.enterprise
+        enterprise: applyCmd.flags.enterprise,
+        allowOrgSecretDeletes: applyCmd.flags.allowOrgSecretDeletes
       })
     }
   }
