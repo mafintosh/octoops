@@ -606,8 +606,8 @@ async function apply(config, opts = {}) {
 
     for (const raw of config.repos || []) {
       const key = config.org + '/' + raw.name
-      if (raw.delete === true) {
-        if (!raw.name) throw new Error('repo delete requires a "name"')
+      if (raw.deleted === true) {
+        if (!raw.name) throw new Error('repo "deleted" requires a "name"')
         await deleteRepo(config.org, raw.name, dry)
         if (!dry) {
           delete state[key]
@@ -812,7 +812,7 @@ const ROOT_KEYS = new Set([
 const REPO_KEYS = new Set([
   'name', 'description', 'homepage',
   'private', 'internal',
-  'defaultBranch', 'wiki', 'projects', 'archived', 'delete', 'init', 'template',
+  'defaultBranch', 'wiki', 'projects', 'archived', 'deleted', 'init', 'template',
   'merging', 'topics',
   'teams', 'collaborators',
   'branchProtection', 'environments', 'rulesets',
@@ -822,9 +822,9 @@ const REPO_KEYS = new Set([
 ])
 
 const DEFAULTS_KEYS = new Set([...REPO_KEYS, 'extends'])
-DEFAULTS_KEYS.delete('delete')
+DEFAULTS_KEYS.delete('deleted')
 
-const REPO_ALIASES = { extends: 'defaults', inherits: 'defaults' }
+const REPO_ALIASES = { extends: 'defaults', inherits: 'defaults', delete: 'deleted' }
 
 function validateConfig(config) {
   for (const k of Object.keys(config)) {
@@ -838,8 +838,8 @@ function validateConfig(config) {
   for (const name of Object.keys(config.defaults || {})) {
     const entry = config.defaults[name]
     for (const k of Object.keys(entry || {})) {
-      if (k === 'delete') {
-        console.error('warning: "delete" on defaults "' + name + '" is ignored — set it on the repo entry')
+      if (k === 'deleted') {
+        console.error('warning: "deleted" on defaults "' + name + '" is ignored — set it on the repo entry')
         continue
       }
       if (!DEFAULTS_KEYS.has(k)) console.error('warning: unknown property "' + k + '" on defaults "' + name + '"' + suggest(k, DEFAULTS_KEYS, null))
