@@ -100,9 +100,13 @@ const renameCmd = command(
   arg('<from>', 'Current repo name'),
   arg('<to>', 'New repo name'),
   flag('--dry-run|-n', 'Show what would change without making changes'),
+  flag('--replace-empty', 'If the new name already exists as an empty repo, delete it first'),
   async function () {
     const configPath = path.resolve(renameCmd.args.config)
-    await renameRepo(configPath, renameCmd.args.from, renameCmd.args.to, { dry: renameCmd.flags.dryRun })
+    await renameRepo(configPath, renameCmd.args.from, renameCmd.args.to, {
+      dry: renameCmd.flags.dryRun,
+      replaceEmpty: renameCmd.flags.replaceEmpty
+    })
   }
 )
 

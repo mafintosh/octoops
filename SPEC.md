@@ -61,14 +61,15 @@ reconciles actual state with desired state using `gh api` calls.
 
 ## What apply does per repo (in order)
 
-1. Create repo if it doesn't exist
-2. Patch description / visibility if changed
-3. Set topics
-4. For each team: add/update permission if wrong, remove if not in desired list
-5. Apply branch protection rules
-6. Set up environments with team reviewers
-7. Apply rulesets (create or update by name)
-8. Set up npm trusted publishing (OIDC) if `npm` config present
+1. If `renamedFrom` is set, rename that GitHub repo to `name` (delete a size-0 placeholder occupying the new name first)
+2. Create repo if it doesn't exist
+3. Patch description / visibility if changed
+4. Set topics
+5. For each team: add/update permission if wrong, remove if not in desired list
+6. Apply branch protection rules
+7. Set up environments with team reviewers
+8. Apply rulesets (create or update by name)
+9. Set up npm trusted publishing (OIDC) if `npm` config present
 
 ## Behavior
 

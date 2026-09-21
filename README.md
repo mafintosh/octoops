@@ -61,7 +61,15 @@ Rename a repo on GitHub and rewrite the config + state file in one shot:
 ```bash
 octoops rename config.json old-name new-name
 octoops rename --dry-run config.json old-name new-name
+octoops rename --replace-empty config.json old-name new-name
 ```
+
+Changing `name` in the JSON and running `apply` creates a **new empty repo**. It does not rename. To keep commit history, either:
+
+- run `octoops rename` **before** apply (works if the config still has the old name, or already has the new name), or
+- set `renamedFrom` on the repo entry so apply PATCHes GitHub instead of creating
+
+`--replace-empty` deletes a size-0 repo occupying the new name first (the usual leftover from a mistaken apply). Repos with history are never deleted.
 
 The repo entry must live in the file you pass — extends/shared files are not searched. The state key (`<org>/<old>`) is rewritten to `<org>/<new>` so subsequent applies see no diff.
 
@@ -180,6 +188,7 @@ Top-level repo fields for basic settings:
 - `projects: true|false` — enable/disable repo projects
 - `issues: true|false` — enable/disable repo issues
 - `archived: true` — archive the repo (skips further reconcile). Removing this from the config (when state has it) unarchives the repo
+- `renamedFrom` — previous GitHub repo name. Apply PATCHes that repo to `name` (preserving history) instead of creating a new empty one. Idempotent once GitHub already has the new name. If the new name is occupied by a size-0 placeholder, apply deletes that placeholder first. Must be set on the repo entry itself (ignored on defaults packs)
 - `init: true` — initialize the repo with a README so the default branch exists. On create, passes `--add-readme` to `gh repo create`. On an existing empty repo (no branches), creates `README.md` retroactively. Once initialized, recorded in state and not re-checked
 - `actionsAccess` — `"none"` | `"organization"` | `"enterprise"`. Controls which other repos' GitHub Actions workflows can access this repo's actions and reusable workflows (Settings → Actions → General → Access). Only relevant for private repos.
 - `forkPrContributorApproval` — `"all_external_contributors"` | `"first_time_contributors"` | `"first_time_contributors_new_to_github"`. Controls who must wait for approval before GitHub Actions runs on fork pull requests (Settings → Actions → General → Fork pull request workflows from outside collaborators).
