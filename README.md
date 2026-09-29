@@ -806,6 +806,26 @@ For repos that publish multiple packages, use an array:
 ]
 ```
 
+A single package can also be published by more than one workflow — `trustedPublishing` takes an array too:
+
+```json
+"npm": {
+  "package": "my-module",
+  "trustedPublishing": [
+    { "workflow": "publish.yml", "environment": "npm" },
+    { "workflow": "nightly.yml", "environment": "npm" }
+  ]
+}
+```
+
+Don't mix the two up: `npm` as an array means several packages from one repo, `trustedPublishing` as an array means several workflows publishing one package. A bare object is shorthand for a one-element list, so existing configs keep working untouched. npm allows up to 10 publishers per package.
+
+Publishers reconcile as a set keyed on `(repository, workflow, environment)`. Declared but missing gets added (`npm-trust`), present but undeclared gets revoked (`npm-untrust`), and anything already matching is left alone. A missing `environment` counts as none on both sides, so `undefined`, `null` and `""` never churn. Adds run before revokes, so an interrupted apply leaves a package with too many publishers rather than none.
+
+Needs npm **11.15.0 or newer**. Earlier versions have no `--allow-publish` flag on `npm trust github`, so every add fails with `EUSAGE`.
+
+`--dry-run` prints each declared publisher without reading the registry, so it shows what's declared rather than what would change.
+
 You can also manage the package's npm maintainer list:
 
 ```json

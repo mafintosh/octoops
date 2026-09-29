@@ -2482,21 +2482,15 @@ async function reconcileNpm(org, repoName, npm, dry) {
 
   if (!tp) return ok
 
-  const setArgs = [
-    'trust',
-    'github',
-    pkg,
-    '--file',
-    tp.workflow,
-    '--repository',
-    `${org}/${repoName}`,
-    '--allow-publish',
-    '--yes'
-  ]
-  if (tp.environment) setArgs.push('--environment', tp.environment)
+  const desired = (Array.isArray(tp) ? tp : [tp]).map((e) => {
+    if (!e.workflow) {
+      throw new Error('npm.trustedPublishing.workflow is required for ' + org + '/' + repoName)
+    }
+    return { repository: `${org}/${repoName}`, file: e.workflow, environment: e.environment || null }
+  })
 
-  print(dry, 'npm-trust', pkg, `${org}/${repoName} via ${tp.workflow}`)
-  if (dry) return
+  for (const d of desired) print(dry, 'npm-trust', pkg, `${d.repository} via ${d.file}`)
+  if (dry) return ok
 
   console.log(
     '\n  When authenticating with npm, check the box to allow 5 minutes of non-authenticated access.\n'
@@ -2506,26 +2500,85 @@ async function reconcileNpm(org, repoName, npm, dry) {
   await run('npm', ['trust', 'list', pkg], { interactive: true })
 
   // now re-run piped to capture JSON
-  const out = await run('npm', ['trust', 'list', pkg, '--json'])
-  const parsed = out ? JSON.parse(out) : []
-  const current = Array.isArray(parsed) ? parsed : [parsed]
+  const current = parseTrustList(await run('npm', ['trust', 'list', pkg, '--json']))
+  const { add, revoke } = planTrustedPublishers(current, desired)
 
-  const match = current.find(
-    (c) =>
-      c.type === 'github' &&
-      c.repository === `${org}/${repoName}` &&
-      c.file === tp.workflow &&
-      (c.environment || null) === (tp.environment || null)
-  )
+  // add before revoke so an interrupted run leaves too many publishers rather
+  // than none, and a failing add aborts before anything is taken away
+  for (const d of add) {
+    const setArgs = [
+      'trust',
+      'github',
+      pkg,
+      '--file',
+      d.file,
+      '--repository',
+      d.repository,
+      '--allow-publish',
+      '--yes'
+    ]
+    if (d.environment) setArgs.push('--environment', d.environment)
+    await run('npm', setArgs, { interactive: true })
+  }
 
-  if (match) return ok
-
-  for (const c of current) {
+  for (const c of revoke) {
     if (c.id) await run('npm', ['trust', 'revoke', pkg, '--id', c.id], { interactive: true })
   }
 
-  await run('npm', setArgs, { interactive: true })
   return ok
+}
+
+// npm prints one object per publisher, concatenated — never a JSON array — so
+// JSON.parse over the whole stream throws as soon as a package has two. Walk
+// brace depth instead. The filter drops the auth prompt npm interleaves when it
+// wants a one-time password; only trust configs carry a type.
+function parseTrustList(out) {
+  const objects = []
+  let depth = 0
+  let start = -1
+  let inString = false
+  let escaped = false
+
+  for (let i = 0; i < out.length; i++) {
+    const ch = out[i]
+
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+
+    if (ch === '"') {
+      inString = true
+    } else if (ch === '{') {
+      if (depth === 0) start = i
+      depth++
+    } else if (ch === '}') {
+      depth--
+      if (depth === 0 && start !== -1) {
+        try {
+          objects.push(JSON.parse(out.slice(start, i + 1)))
+        } catch {
+          // a fragment we can't read is not worth failing the whole apply over
+        }
+        start = -1
+      }
+    }
+  }
+
+  return objects.filter((o) => o && o.type)
+}
+
+function planTrustedPublishers(current, desired) {
+  const key = (e) => [e.repository, e.file, e.environment || null].join('\n')
+  const currentKeys = new Set(current.map(key))
+  const desiredKeys = new Set(desired.map(key))
+
+  return {
+    add: desired.filter((d) => !currentKeys.has(key(d))),
+    revoke: current.filter((c) => !desiredKeys.has(key(c)))
+  }
 }
 
 async function reconcileNpmMaintainers(pkg, desired, dry) {
