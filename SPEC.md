@@ -86,7 +86,10 @@ list, so existing configs keep working unchanged.
 
 - Publishers reconcile as a set keyed on `(repository, workflow, environment)` — declared and
   missing gets added, present and undeclared gets revoked, matches are left alone. A missing
-  `environment` counts as none on both sides.
+  `environment` counts as none on both sides. Duplicates are collapsed.
+- Only GitHub publishers bound to this repo are reconciled; other repos and other providers are
+  left alone
+- An empty list is a config error. Remove the key to skip trusted publishing instead.
 - Adds run before revokes, so an interrupted apply leaves a package with too many publishers
   rather than none
 - Requires npm 11.15.0 or newer. Earlier versions have no `--allow-publish` flag on

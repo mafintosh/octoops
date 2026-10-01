@@ -2482,15 +2482,31 @@ async function reconcileNpm(org, repoName, npm, dry) {
 
   if (!tp) return ok
 
-  const desired = (Array.isArray(tp) ? tp : [tp]).map((e) => {
+  // an empty list would revoke every publisher on the package, which is almost
+  // always an editing slip rather than intent — delete the key to skip instead
+  if (Array.isArray(tp) && tp.length === 0) {
+    throw new Error('npm.trustedPublishing is empty for ' + org + '/' + repoName)
+  }
+
+  const repository = `${org}/${repoName}`
+  const seen = new Set()
+  const desired = []
+
+  for (const e of Array.isArray(tp) ? tp : [tp]) {
     if (!e.workflow) {
       throw new Error('npm.trustedPublishing.workflow is required for ' + org + '/' + repoName)
     }
-    return { repository: `${org}/${repoName}`, file: e.workflow, environment: e.environment || null }
-  })
+    const entry = { repository, file: e.workflow, environment: e.environment || null }
+    // declaring the same triple twice would make the second npm trust call fail
+    if (seen.has(trustKey(entry))) continue
+    seen.add(trustKey(entry))
+    desired.push(entry)
+  }
 
-  for (const d of desired) print(dry, 'npm-trust', pkg, `${d.repository} via ${d.file}`)
-  if (dry) return ok
+  if (dry) {
+    for (const d of desired) print(dry, 'npm-trust', pkg, `${d.repository} via ${d.file}`)
+    return ok
+  }
 
   console.log(
     '\n  When authenticating with npm, check the box to allow 5 minutes of non-authenticated access.\n'
@@ -2500,8 +2516,16 @@ async function reconcileNpm(org, repoName, npm, dry) {
   await run('npm', ['trust', 'list', pkg], { interactive: true })
 
   // now re-run piped to capture JSON
-  const current = parseTrustList(await run('npm', ['trust', 'list', pkg, '--json']))
+  const listed = parseTrustList(await run('npm', ['trust', 'list', pkg, '--json']))
+
+  // only reconcile what this entry declares: publishers bound to another repo,
+  // or to a provider other than GitHub, are not ours to revoke
+  const current = listed.filter((c) => c.type === 'github' && c.repository === repository)
+
   const { add, revoke } = planTrustedPublishers(current, desired)
+
+  for (const d of add) print(dry, 'npm-trust', pkg, `${d.repository} via ${d.file}`)
+  for (const c of revoke) print(dry, 'npm-untrust', pkg, `${c.repository} via ${c.file}`)
 
   // add before revoke so an interrupted run leaves too many publishers rather
   // than none, and a failing add aborts before anything is taken away
@@ -2555,6 +2579,9 @@ function parseTrustList(out) {
       if (depth === 0) start = i
       depth++
     } else if (ch === '}') {
+      // a stray closer would drive depth negative and stop every later object
+      // from being recognised
+      if (depth === 0) continue
       depth--
       if (depth === 0 && start !== -1) {
         try {
@@ -2567,17 +2594,26 @@ function parseTrustList(out) {
     }
   }
 
+  // reading nothing out of non-empty output means a revoke-everything plan, so
+  // say so rather than letting it look like an empty package
+  if (!objects.length && out.trim()) {
+    console.log('  warning: could not read any trusted publisher from npm output')
+  }
+
   return objects.filter((o) => o && o.type)
 }
 
+function trustKey(entry) {
+  return [entry.repository, entry.file, entry.environment || null].join('\n')
+}
+
 function planTrustedPublishers(current, desired) {
-  const key = (e) => [e.repository, e.file, e.environment || null].join('\n')
-  const currentKeys = new Set(current.map(key))
-  const desiredKeys = new Set(desired.map(key))
+  const currentKeys = new Set(current.map(trustKey))
+  const desiredKeys = new Set(desired.map(trustKey))
 
   return {
-    add: desired.filter((d) => !currentKeys.has(key(d))),
-    revoke: current.filter((c) => !desiredKeys.has(key(c)))
+    add: desired.filter((d) => !currentKeys.has(trustKey(d))),
+    revoke: current.filter((c) => !desiredKeys.has(trustKey(c)))
   }
 }
 
