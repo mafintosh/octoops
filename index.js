@@ -391,6 +391,8 @@ function seed(config, opts = {}) {
   }
 
   for (const raw of config.repos || []) {
+    // a deleted repo has no state, seeding one would resurrect it
+    if (raw.deleted === true) continue
     const repo = resolve(resolveDefaults(raw, config.defaults), presets)
     const key = config.org + '/' + repo.name
     const entry = {}
@@ -478,9 +480,10 @@ async function resync(config, opts = {}) {
     only.push('teams')
     importOpts.teams = config.teams.map((t) => t.name)
   }
-  if (config.repos && config.repos.length) {
+  const repos = (config.repos || []).filter((r) => r.deleted !== true)
+  if (repos.length) {
     only.push('repos')
-    importOpts.repos = config.repos.map((r) => r.name)
+    importOpts.repos = repos.map((r) => r.name)
   }
   if (only.length) importOpts.only = only
 
