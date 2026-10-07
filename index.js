@@ -633,9 +633,18 @@ async function apply(config, opts = {}) {
     }
 
     for (const raw of config.repos || []) {
-      const repo = resolve(resolveDefaults(raw, config.defaults), presets)
-      const key = config.org + '/' + repo.name
+      const key = config.org + '/' + raw.name
+      if (raw.deleted === true) {
+        if (!raw.name) throw new Error('repo "deleted" requires a "name"')
+        await deleteRepo(config.org, raw.name, dry)
+        if (!dry) {
+          delete state[key]
+          if (opts.statePath) saveState(opts.statePath, state)
+        }
+        continue
+      }
 
+      const repo = resolve(resolveDefaults(raw, config.defaults), presets)
       // a rename is one-shot, state records which renamedFrom it already handled.
       // (not keyed on the entry existing, a mistaken apply may have left one for the new name)
       if (raw.renamedFrom && (state[key] || {}).renamedFrom !== raw.renamedFrom) {
@@ -898,7 +907,7 @@ const ROOT_KEYS = new Set([
 const REPO_KEYS = new Set([
   'name', 'description', 'homepage',
   'private', 'internal',
-  'defaultBranch', 'wiki', 'projects', 'issues', 'archived', 'init', 'template',
+  'defaultBranch', 'wiki', 'projects', 'issues', 'archived', 'deleted', 'init', 'template',
   'merging', 'topics',
   'teams', 'collaborators',
   'branchProtection', 'environments', 'rulesets',
@@ -907,10 +916,10 @@ const REPO_KEYS = new Set([
   'defaults', 'presets', 'renamedFrom'
 ])
 
-// renamedFrom names one specific repo, so it makes no sense on a defaults pack
-const DEFAULTS_KEYS = new Set([...REPO_KEYS, 'extends'].filter((k) => k !== 'renamedFrom'))
+// renamedFrom names one specific repo, so it makes no sense on a defaults pack, nor does deleted
+const DEFAULTS_KEYS = new Set([...REPO_KEYS, 'extends'].filter((k) => k !== 'renamedFrom' && k !== 'deleted'))
 
-const REPO_ALIASES = { extends: 'defaults', inherits: 'defaults' }
+const REPO_ALIASES = { extends: 'defaults', inherits: 'defaults', delete: 'deleted' }
 
 function validateConfig(config) {
   for (const k of Object.keys(config)) {
@@ -927,6 +936,10 @@ function validateConfig(config) {
   for (const name of Object.keys(config.defaults || {})) {
     const entry = config.defaults[name]
     for (const k of Object.keys(entry || {})) {
+      if (k === 'deleted') {
+        console.error('warning: "deleted" on defaults "' + name + '" is ignored — set it on the repo entry')
+        continue
+      }
       if (!DEFAULTS_KEYS.has(k)) console.error('warning: unknown property "' + k + '" on defaults "' + name + '"' + suggest(k, DEFAULTS_KEYS, null))
     }
   }
@@ -2795,6 +2808,17 @@ async function githubRename(org, from, to, dry) {
 
 function sameName(a, b) {
   return a.toLowerCase() === b.toLowerCase()
+}
+
+async function deleteRepo(org, name, dry) {
+  print(dry, 'delete', `${org}/${name}`)
+  if (dry) return
+  try {
+    await gh(['api', `repos/${org}/${name}`, '--method', 'DELETE'])
+  } catch (err) {
+    if (!/Not Found/.test(err.message)) throw err
+    print(false, 'skip-delete', `${org}/${name}`, 'already gone')
+  }
 }
 
 async function createRepo(org, repo) {
