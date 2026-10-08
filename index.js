@@ -171,6 +171,14 @@ async function importRepo(org, name) {
     }
   } catch {}
 
+  try {
+    const pvr = JSON.parse(await gh(['api', `repos/${org}/${name}/private-vulnerability-reporting`]))
+    if (pvr && pvr.enabled) {
+      entry.security = entry.security || {}
+      entry.security.privateVulnerabilityReporting = true
+    }
+  } catch {}
+
   const { names: topics } = JSON.parse(await gh(['api', `repos/${org}/${name}/topics`]))
   if (topics.length) entry.topics = topics
 
@@ -1197,6 +1205,18 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     }
   }
 
+  if (repo.security && repo.security.privateVulnerabilityReporting !== undefined && current) {
+    const prevPvr = prev.security && prev.security.privateVulnerabilityReporting
+    if (prevPvr !== repo.security.privateVulnerabilityReporting || prev.private !== repo.private || prev.internal !== repo.internal) {
+      const isPublic = !repo.internal && (repo.private === false || (repo.private === undefined && prev.private === false))
+      if (isPublic) {
+        await reconcilePrivateVulnerabilityReporting(org, repo.name, repo.security.privateVulnerabilityReporting, dry)
+      } else {
+        print(dry, 'skip-private-vulnerability-reporting', `${org}/${repo.name}`, 'repo is not public')
+      }
+    }
+  }
+
   if (repo.actionsAccess !== undefined && current && repo.actionsAccess !== prev.actionsAccess) {
     await reconcileActionsAccess(org, repo.name, repo.actionsAccess, dry)
   }
@@ -1448,6 +1468,25 @@ async function reconcileCodeScanning(org, name, enabled, dry) {
   } catch (err) {
     if (/Advanced Security|not available|HTTP 403|HTTP 422/i.test(err.message)) {
       print(dry, 'skip-code-scanning', `${org}/${name}`, err.message.split('\n')[0].slice(0, 200))
+      return
+    }
+    throw err
+  }
+}
+
+async function reconcilePrivateVulnerabilityReporting(org, name, enabled, dry) {
+  let current = null
+  try {
+    current = JSON.parse(await gh(['api', `repos/${org}/${name}/private-vulnerability-reporting`]))
+  } catch {}
+  if (current && current.enabled === enabled) return
+  print(dry, 'private-vulnerability-reporting', `${org}/${name}`, enabled ? 'enabled' : 'disabled')
+  if (dry) return
+  try {
+    await gh(['api', `repos/${org}/${name}/private-vulnerability-reporting`, '--method', enabled ? 'PUT' : 'DELETE'])
+  } catch (err) {
+    if (/HTTP 403|HTTP 404|HTTP 422/i.test(err.message)) {
+      print(dry, 'skip-private-vulnerability-reporting', `${org}/${name}`, err.message.split('\n')[0].slice(0, 200))
       return
     }
     throw err

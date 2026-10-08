@@ -313,12 +313,15 @@ Per-repo, under `security`:
     "secretScanningPushProtection": true,
     "secretScanningValidityChecks": true,
     "dependabotSecurityUpdates": true,
-    "codeScanningDefaultSetup": true
+    "codeScanningDefaultSetup": true,
+    "privateVulnerabilityReporting": true
   }
 }
 ```
 
 Maps to the repo's `security_and_analysis` settings; `codeScanningDefaultSetup` toggles the code-scanning default setup via its own endpoint. If GHAS isn't available on the plan/repo (private without GHAS, forks, etc.) the relevant calls log `skip-code-scanning` and continue.
+
+`privateVulnerabilityReporting` toggles private vulnerability reporting via its own endpoint. GitHub only offers it on public repos, so on a private or internal repo it logs `skip-private-vulnerability-reporting` and is applied once the config makes the repo public.
 
 Org-level defaults for newly-created repos can be set at the top level:
 
