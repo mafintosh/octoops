@@ -220,6 +220,17 @@ async function importRepo(org, name) {
           .map((r) => ({ team: r.reviewer.name }))
         if (reviewers.length) e.reviewers = reviewers
         if (env.prevent_self_review) e.preventSelfReview = true
+        const policy = env.deployment_branch_policy
+        if (policy && policy.protected_branches) e.deploymentBranches = 'protected'
+        else if (policy && policy.custom_branch_policies) {
+          try {
+            const { branch_policies: patterns } = JSON.parse(
+              await gh(['api', `repos/${org}/${name}/environments/${env.name}/deployment-branch-policies?per_page=100`])
+            )
+            // tag patterns can't be expressed yet, so leave those environments unmanaged
+            if (patterns.length && patterns.every((p) => p.type !== 'tag')) e.deploymentBranches = patterns.map((p) => p.name)
+          } catch {}
+        }
         entry.environments.push(e)
       }
     }
@@ -1275,6 +1286,9 @@ async function reconcile(org, repo, prev, dry, done, opts) {
       print(dry, 'skip-environments', `${org}/${repo.name}`, 'requires enterprise for private repos with reviewers')
     } else {
       for (const env of repo.environments || []) {
+        if (env.deploymentBranches !== undefined) deploymentBranchPolicy(env)
+      }
+      for (const env of repo.environments || []) {
         if (current) await reconcileEnvironment(org, repo.name, env, dry)
       }
       if (repo.environments) done.environments = repo.environments
@@ -2128,11 +2142,16 @@ async function reconcileBranchProtection(org, name, rule, dry) {
 }
 
 async function reconcileEnvironment(org, repoName, env, dry) {
+  const managesBranches = env.deploymentBranches !== undefined
+  const desiredPolicy = managesBranches ? deploymentBranchPolicy(env) : null
+
   const current = await getEnvironment(org, repoName, env.name)
+  const currentPolicy = current ? current.deployment_branch_policy || null : null
 
   const desiredReviewerSlugs = (env.reviewers || []).map((r) => slugify(r.team))
   const desiredPreventSelfReview = env.preventSelfReview === true
 
+  let upToDate = false
   if (current) {
     const currentSlugs = (current.protection_rules || [])
       .flatMap((r) => r.reviewers || [])
@@ -2142,32 +2161,96 @@ async function reconcileEnvironment(org, repoName, env, dry) {
 
     const currentPreventSelfReview = current.prevent_self_review === true
 
-    if (
+    upToDate =
       JSON.stringify(currentSlugs) === JSON.stringify([...desiredReviewerSlugs].sort()) &&
-      currentPreventSelfReview === desiredPreventSelfReview
-    ) return
+      currentPreventSelfReview === desiredPreventSelfReview &&
+      (!managesBranches || sameDeploymentBranchPolicy(currentPolicy, desiredPolicy))
   }
 
-  print(
-    dry,
-    'environment',
-    `${org}/${repoName}`,
-    `${env.name} reviewers=${desiredReviewerSlugs.join(',')} preventSelfReview=${desiredPreventSelfReview}`
-  )
-  if (dry) return
-
-  const reviewers = []
-  for (const slug of desiredReviewerSlugs) {
-    const team = JSON.parse(await gh(['api', `orgs/${org}/teams/${slug}`]))
-    reviewers.push({ type: 'Team', id: team.id })
+  if (!upToDate) {
+    print(
+      dry,
+      'environment',
+      `${org}/${repoName}`,
+      `${env.name} reviewers=${desiredReviewerSlugs.join(',')} preventSelfReview=${desiredPreventSelfReview}` +
+        (managesBranches ? ` deploymentBranches=${describeDeploymentBranches(env.deploymentBranches)}` : '')
+    )
   }
 
-  await gh(
-    ['api', `repos/${org}/${repoName}/environments/${env.name}`, '--method', 'PUT', '--input', '-'],
-    {
-      body: { reviewers, prevent_self_review: desiredPreventSelfReview }
+  if (!upToDate && !dry) {
+    const reviewers = []
+    for (const slug of desiredReviewerSlugs) {
+      const team = JSON.parse(await gh(['api', `orgs/${org}/teams/${slug}`]))
+      reviewers.push({ type: 'Team', id: team.id })
     }
+
+    const body = { reviewers, prevent_self_review: desiredPreventSelfReview }
+    // GitHub doesn't document what an omitted deployment_branch_policy does on PUT, so an
+    // unmanaged policy is always sent back as it is rather than risking a reset to "all branches"
+    if (managesBranches) body.deployment_branch_policy = desiredPolicy
+    else if (current) body.deployment_branch_policy = currentPolicy
+
+    await gh(
+      ['api', `repos/${org}/${repoName}/environments/${env.name}`, '--method', 'PUT', '--input', '-'],
+      { body }
+    )
+  }
+
+  if (desiredPolicy && desiredPolicy.custom_branch_policies) {
+    // in dry-run a missing or non-custom environment has no patterns to list yet
+    const canList = !dry || (currentPolicy !== null && currentPolicy.custom_branch_policies === true)
+    await reconcileDeploymentBranches(org, repoName, env.name, env.deploymentBranches, canList, dry)
+  }
+}
+
+function deploymentBranchPolicy(env) {
+  const branches = env.deploymentBranches
+  if (branches === 'all') return null
+  if (branches === 'protected') return { protected_branches: true, custom_branch_policies: false }
+  if (Array.isArray(branches) && branches.length && branches.every((b) => typeof b === 'string' && b)) {
+    return { protected_branches: false, custom_branch_policies: true }
+  }
+  throw new Error(
+    'environment "' + env.name + '" deploymentBranches must be "all", "protected", or a non-empty list of branch name patterns'
   )
+}
+
+function sameDeploymentBranchPolicy(a, b) {
+  if (a === null || b === null) return a === b
+  return a.protected_branches === b.protected_branches && a.custom_branch_policies === b.custom_branch_policies
+}
+
+function describeDeploymentBranches(branches) {
+  return Array.isArray(branches) ? branches.join(',') : branches
+}
+
+async function reconcileDeploymentBranches(org, repoName, envName, desired, canList, dry) {
+  const base = `repos/${org}/${repoName}/environments/${envName}/deployment-branch-policies`
+  const current = canList ? JSON.parse(await gh(['api', base + '?per_page=100'])).branch_policies || [] : []
+
+  const wanted = new Set(desired)
+  const have = new Set(current.filter((p) => p.type !== 'tag').map((p) => p.name))
+
+  // removes first, so an interrupted apply leaves fewer branches able to deploy, never more
+  for (const p of current) {
+    if (p.type !== 'tag' && wanted.has(p.name)) continue
+    print(dry, 'remove-deployment-branch', `${org}/${repoName}`, `${envName} ${p.type || 'branch'}:${p.name}`)
+    if (!dry) {
+      try {
+        await gh(['api', `${base}/${p.id}`, '--method', 'DELETE'])
+      } catch (err) {
+        if (!/Not Found/.test(err.message)) throw err
+      }
+    }
+  }
+
+  for (const name of wanted) {
+    if (have.has(name)) continue
+    print(dry, 'add-deployment-branch', `${org}/${repoName}`, `${envName} branch:${name}`)
+    if (!dry) {
+      await gh(['api', base, '--method', 'POST', '--input', '-'], { body: { name, type: 'branch' } })
+    }
+  }
 }
 
 async function reconcileRulesets(org, repoName, desired, prev, dry) {
