@@ -67,7 +67,7 @@ reconciles actual state with desired state using `gh api` calls.
 4. Set topics
 5. For each team: add/update permission if wrong, remove if not in desired list
 6. Apply branch protection rules
-7. Set up environments with team reviewers
+7. Set up environments with team reviewers and deployment branch policies
 8. Apply rulesets (create or update by name)
 9. Set up npm trusted publishing (OIDC) if `npm` config present
 

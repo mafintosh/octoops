@@ -479,13 +479,26 @@ Each entry in `environments` supports:
 - `name` — required
 - `reviewers: [{ team }]` — required-reviewer teams (deployments are gated until one approves). On private repos this requires GitHub Enterprise; otherwise octoops prints `skip-environments` unless `enterprise: true` is set
 - `preventSelfReview: true` — block the actor who triggered a deployment from approving it themselves
+- `deploymentBranches` — which branches can deploy to the environment (Settings → Environments → Deployment branches and tags):
+  - `"all"` — no restriction
+  - `"protected"` — only branches with branch protection rules
+  - `["main", "release/*"]` — only branches matching these name patterns (fnmatch; `*` does not match `/`)
 - `secrets` — see "Secrets" below
 
 ```json
 "environments": [
-  { "name": "npm", "reviewers": [{ "team": "release" }], "preventSelfReview": true }
+  { "name": "npm", "reviewers": [{ "team": "release" }], "preventSelfReview": true },
+  { "name": "prune", "deploymentBranches": ["main"] }
 ]
 ```
+
+`deploymentBranches` behavior:
+
+- Omitting it leaves the environment's current branch policy untouched. When octoops updates reviewers it sends the existing policy back, so it is never reset as a side effect
+- A pattern list is reconciled as a set: missing patterns are added, patterns not in the list are removed. Tag patterns set in the UI count as not in the list and are removed
+- Removals run before additions, so an interrupted apply leaves fewer branches able to deploy, never more
+- An empty list is an error. GitHub would accept it and block every branch, which is almost never what you want
+- `octoops import` emits `deploymentBranches` for `"protected"` and for branch-only pattern lists. Environments with tag patterns are left out so an import never claims them
 
 ### Secrets
 
