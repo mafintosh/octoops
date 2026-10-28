@@ -185,6 +185,7 @@ Top-level repo fields for basic settings:
 - `wiki: true|false` — enable/disable repo wiki
 - `projects: true|false` — enable/disable repo projects
 - `issues: true|false` — enable/disable repo issues
+- `discussions: true|false` — enable/disable repo discussions
 - `archived: true` — archive the repo (skips further reconcile). A repo that does not exist yet is created (and initialized if `init: true`) before being archived. Removing this from the config (when state has it) unarchives the repo
 - `renamedFrom` — previous GitHub name of this repo. Apply renames that repo to `name` (keeping history) and moves the state entry, instead of creating a new empty repo. Once done it is recorded in state and not re-checked, so it is safe to leave in the config. If neither name exists on GitHub the repo is created as usual. Only on repo entries, not on defaults
 - `deleted: true` — delete the repo on GitHub. Must be set on the repo entry itself (ignored on defaults packs). Removing a repo from the config does **not** delete it. A 404 (already gone) is treated as success. The delete is recorded in state as `{ "deleted": true }`, so the entry can stay in the config and later applies skip it without calling GitHub. Dropping the `deleted` flag again clears that record and the next apply recreates the repo. Remove the entry from the config once you no longer need the reminder

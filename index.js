@@ -164,6 +164,7 @@ async function importRepo(org, name) {
   if (repo.has_wiki === false) entry.wiki = false
   if (repo.has_projects === false) entry.projects = false
   if (repo.has_issues === false) entry.issues = false
+  if (repo.has_discussions === true) entry.discussions = true
   if (repo.is_template === true) entry.template = true
 
   try {
@@ -454,6 +455,7 @@ function seed(config, opts = {}) {
     if (repo.wiki !== undefined) entry.wiki = repo.wiki
     if (repo.projects !== undefined) entry.projects = repo.projects
     if (repo.issues !== undefined) entry.issues = repo.issues
+    if (repo.discussions !== undefined) entry.discussions = repo.discussions
     if (typeof repo.template === 'boolean') entry.template = repo.template
     if (repo.actionsAccess !== undefined) entry.actionsAccess = repo.actionsAccess
     if (repo.forkPrContributorApproval !== undefined) entry.forkPrContributorApproval = repo.forkPrContributorApproval
@@ -1015,7 +1017,7 @@ const SECRET_VISIBILITY = new Set(['all', 'private', 'selected'])
 const REPO_KEYS = new Set([
   'name', 'description', 'homepage',
   'private', 'internal',
-  'defaultBranch', 'wiki', 'projects', 'issues', 'archived', 'deleted', 'init', 'template',
+  'defaultBranch', 'wiki', 'projects', 'issues', 'discussions', 'archived', 'deleted', 'init', 'template',
   'merging', 'topics',
   'teams', 'collaborators',
   'branchProtection', 'environments', 'rulesets',
@@ -1213,7 +1215,7 @@ function repoChanged(repo, prev, opts) {
   if (prev.archived && !repo.archived) return true
   const settings = {}
   const prevSettings = {}
-  for (const k of ['description', 'homepage', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'issues', 'security', 'template']) {
+  for (const k of ['description', 'homepage', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'issues', 'discussions', 'security', 'template']) {
     if (repo[k] === undefined) continue
     if (k === 'template' && typeof repo[k] !== 'boolean') continue
     settings[k] = repo[k]
@@ -1274,7 +1276,7 @@ async function reconcile(org, repo, prev, dry, done, opts) {
 
   const settings = {}
   const prevSettings = {}
-  for (const k of ['description', 'homepage', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'issues', 'security', 'template']) {
+  for (const k of ['description', 'homepage', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'issues', 'discussions', 'security', 'template']) {
     if (repo[k] === undefined) continue
     if (k === 'template' && typeof repo[k] !== 'boolean') continue
     settings[k] = repo[k]
@@ -1293,6 +1295,7 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   if (repo.wiki !== undefined) done.wiki = repo.wiki
   if (repo.projects !== undefined) done.projects = repo.projects
   if (repo.issues !== undefined) done.issues = repo.issues
+  if (repo.discussions !== undefined) done.discussions = repo.discussions
   if (typeof repo.template === 'boolean') done.template = repo.template
   if (repo.security) done.security = repo.security
 
@@ -1432,6 +1435,7 @@ async function reconcileSettings(org, repo, dry, prev = {}) {
   if (repo.wiki !== undefined) patch.has_wiki = repo.wiki
   if (repo.projects !== undefined) patch.has_projects = repo.projects
   if (repo.issues !== undefined) patch.has_issues = repo.issues
+  if (repo.discussions !== undefined) patch.has_discussions = repo.discussions
   if (typeof repo.template === 'boolean') patch.is_template = repo.template
   if (repo.merging) {
     const m = repo.merging
@@ -3358,6 +3362,13 @@ async function getRepo(org, name) {
   }
 }
 
+// gh api follows the redirect GitHub keeps for a renamed repo, so the old name
+// still answers with the repo under its new name. only an exact name counts
+async function repoExists(org, name) {
+  const repo = await getRepo(org, name)
+  return repo !== null && sameName(repo.name, name)
+}
+
 // Renames org/from to org/to on GitHub, keeping history. Returns 'renamed',
 // 'already' (GitHub has the new name) or 'missing' (neither name exists).
 // Never touches whatever sits on the new name, that is the user's call.
@@ -3409,7 +3420,7 @@ async function ensureRepo(org, repo, prev, dry, done) {
   // state alone is no proof the repo exists, a failed apply saves partial
   // progress (and a missing renamedFrom records itself) before anything was
   // created. check GitHub once and record it so later applies skip the call
-  const existing = prev.exists === true || (await getRepo(org, repo.name))
+  const existing = prev.exists === true || (await repoExists(org, repo.name))
   if (existing) done.exists = true
   if (!existing) {
     print(dry, 'create', `${org}/${repo.name}`)
