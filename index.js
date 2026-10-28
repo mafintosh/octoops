@@ -172,6 +172,10 @@ async function importRepo(org, name) {
   } catch {}
 
   try {
+    entry.pages = pagesConfig(JSON.parse(await gh(['api', `repos/${org}/${name}/pages`])))
+  } catch {}
+
+  try {
     const forkPr = JSON.parse(await gh(['api', `repos/${org}/${name}/actions/permissions/fork-pr-contributor-approval`]))
     if (forkPr.approval_policy && forkPr.approval_policy !== 'first_time_contributors_new_to_github') {
       entry.forkPrContributorApproval = forkPr.approval_policy
@@ -453,6 +457,7 @@ function seed(config, opts = {}) {
     if (typeof repo.template === 'boolean') entry.template = repo.template
     if (repo.actionsAccess !== undefined) entry.actionsAccess = repo.actionsAccess
     if (repo.forkPrContributorApproval !== undefined) entry.forkPrContributorApproval = repo.forkPrContributorApproval
+    if (repo.pages !== undefined) entry.pages = repo.pages
     if (repo.security) entry.security = repo.security
     if (repo.topics) entry.topics = repo.topics
     if (repo.teams) entry.teams = repo.teams
@@ -1015,7 +1020,7 @@ const REPO_KEYS = new Set([
   'teams', 'collaborators',
   'branchProtection', 'environments', 'rulesets',
   'npm', 'pypi', 'secrets', 'security',
-  'actionsAccess', 'forkPrContributorApproval', 'githubPackages',
+  'actionsAccess', 'forkPrContributorApproval', 'githubPackages', 'pages',
   'defaults', 'presets', 'renamedFrom'
 ])
 
@@ -1226,6 +1231,7 @@ function repoChanged(repo, prev, opts) {
   if ((repo.githubPackages || prev.githubPackages) && changed(repo.githubPackages, prev.githubPackages)) return true
   if (repo.actionsAccess !== undefined && repo.actionsAccess !== prev.actionsAccess) return true
   if (repo.forkPrContributorApproval !== undefined && repo.forkPrContributorApproval !== prev.forkPrContributorApproval) return true
+  if (repo.pages !== undefined && changed(repo.pages, prev.pages)) return true
   if ((repo.secrets || prev.secrets) && secretsChanged(repo.secrets || [], prev.secrets, opts)) return true
   if (repo.environments && repo.environments.some((e) => (e.secrets || (prev.envSecrets || {})[e.name]) && secretsChanged(e.secrets || [], (prev.envSecrets || {})[e.name], opts))) return true
   if (prev.envSecrets && !repo.environments) return true
@@ -1306,6 +1312,11 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     await reconcileForkPrContributorApproval(org, repo.name, repo.forkPrContributorApproval, dry)
   }
   if (repo.forkPrContributorApproval !== undefined) done.forkPrContributorApproval = repo.forkPrContributorApproval
+
+  if (repo.pages !== undefined && changed(repo.pages, prev.pages)) {
+    await reconcilePages(org, repo.name, repo.pages, dry, opts)
+  }
+  if (repo.pages !== undefined) done.pages = repo.pages
 
   if ((repo.topics || prev.topics) && changed(repo.topics, prev.topics)) {
     await reconcileTopics(org, repo.name, repo.topics || [], dry)
@@ -1564,6 +1575,76 @@ async function reconcileCodeScanning(org, name, enabled, dry) {
     }
     throw err
   }
+}
+
+// GitHub's Pages API shape -> the config shape (`pages` on a repo)
+function pagesConfig(site) {
+  const pages = { build: site.build_type === 'workflow' ? 'workflow' : 'branch' }
+  if (pages.build === 'branch' && site.source) {
+    pages.branch = site.source.branch
+    if (site.source.path && site.source.path !== '/') pages.path = site.source.path
+  }
+  if (site.public === false) pages.private = true
+  return pages
+}
+
+function pagesBody(pages) {
+  const body = { build_type: pages.build === 'branch' ? 'legacy' : 'workflow' }
+  if (pages.build === 'branch') body.source = { branch: pages.branch, path: pages.path || '/' }
+  return body
+}
+
+function describePages(pages) {
+  const parts = [pages.build === 'branch' ? 'branch ' + pages.branch + ' ' + (pages.path || '/') : 'workflow']
+  if (pages.private !== undefined) parts.push(pages.private ? 'private' : 'public')
+  return parts.join(', ')
+}
+
+async function reconcilePages(org, name, pages, dry, opts) {
+  let current = null
+  try {
+    current = JSON.parse(await gh(['api', `repos/${org}/${name}/pages`]))
+  } catch (err) {
+    if (!/Not Found|HTTP 404/.test(err.message)) throw err
+  }
+
+  if (pages === false) {
+    if (!current) return
+    print(dry, 'remove-pages', `${org}/${name}`)
+    if (!dry) await gh(['api', `repos/${org}/${name}/pages`, '--method', 'DELETE'])
+    return
+  }
+
+  const build = pages.build || 'workflow'
+  if (!['workflow', 'branch'].includes(build)) {
+    throw new Error('invalid pages.build "' + build + '" for ' + org + '/' + name + ' (expected workflow|branch)')
+  }
+  if (build === 'branch' && !pages.branch) throw new Error('pages.build "branch" needs pages.branch for ' + org + '/' + name)
+  pages = { ...pages, build }
+
+  // visibility is an Enterprise feature; elsewhere the site is always public
+  const visibility = pages.private !== undefined && opts.enterprise ? { public: !pages.private } : {}
+  if (pages.private && !opts.enterprise) {
+    print(dry, 'skip-pages-private', `${org}/${name}`, 'private Pages requires enterprise')
+  }
+
+  const body = pagesBody(pages)
+  if (!current) {
+    // a new site is public until the PUT below lands; nothing is deployed yet, so nothing is exposed
+    print(dry, 'create-pages', `${org}/${name}`, describePages(pages))
+    if (!dry) await gh(['api', `repos/${org}/${name}/pages`, '--method', 'POST', '--input', '-'], { body })
+    current = { ...body, public: true }
+  }
+
+  const same =
+    current.build_type === body.build_type &&
+    (!body.source || (current.source && current.source.branch === body.source.branch && (current.source.path || '/') === body.source.path)) &&
+    (visibility.public === undefined || current.public === visibility.public)
+  if (same) return
+
+  print(dry, 'pages', `${org}/${name}`, describePages(pages))
+  if (dry) return
+  await gh(['api', `repos/${org}/${name}/pages`, '--method', 'PUT', '--input', '-'], { body: { ...body, ...visibility } })
 }
 
 async function reconcileOrgSecurity(org, security, dry) {
