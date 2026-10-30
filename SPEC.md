@@ -69,7 +69,8 @@ reconciles actual state with desired state using `gh api` calls.
 6. Apply branch protection rules
 7. Set up environments with team reviewers
 8. Apply rulesets (create or update by name)
-9. Set up npm trusted publishing (OIDC) if `npm` config present
+9. Apply Actions event policies (create or update by name, then delete ones dropped from config)
+10. Set up npm trusted publishing (OIDC) if `npm` config present
 
 ## Behavior
 

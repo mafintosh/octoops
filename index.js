@@ -355,6 +355,13 @@ async function importRepo(org, name) {
     }
   } catch {}
 
+  try {
+    const policies = (await getActionsPolicies(org, name))
+      .filter((p) => (p.rules || []).some((r) => r.type === 'restrict_action_events'))
+      .map(actionsPolicyConfig)
+    if (policies.length) entry.actionsPolicies = policies
+  } catch {}
+
   return entry
 }
 
@@ -467,6 +474,7 @@ function seed(config, opts = {}) {
     if (repo.branchProtection) entry.branchProtection = repo.branchProtection
     if (repo.environments) entry.environments = repo.environments
     if (repo.rulesets) entry.rulesets = repo.rulesets
+    if (repo.actionsPolicies) entry.actionsPolicies = repo.actionsPolicies
     if (repo.npm) entry.npm = repo.npm
     if (repo.pypi) entry.pypi = repo.pypi
     if (repo.githubPackages) entry.githubPackages = repo.githubPackages
@@ -1022,7 +1030,7 @@ const REPO_KEYS = new Set([
   'teams', 'collaborators',
   'branchProtection', 'environments', 'rulesets',
   'npm', 'pypi', 'secrets', 'security',
-  'actionsAccess', 'forkPrContributorApproval', 'githubPackages', 'pages',
+  'actionsAccess', 'forkPrContributorApproval', 'actionsPolicies', 'githubPackages', 'pages',
   'defaults', 'presets', 'renamedFrom'
 ])
 
@@ -1228,6 +1236,7 @@ function repoChanged(repo, prev, opts) {
   if (changed(repo.branchProtection, prev.branchProtection)) return true
   if (changed(repo.environments, prev.environments)) return true
   if ((repo.rulesets || prev.rulesets) && changed(repo.rulesets, prev.rulesets)) return true
+  if ((repo.actionsPolicies || prev.actionsPolicies) && changed(repo.actionsPolicies, prev.actionsPolicies)) return true
   if ((repo.npm || prev.npm) && changed(repo.npm, prev.npm)) return true
   if ((repo.pypi || prev.pypi) && changed(repo.pypi, prev.pypi)) return true
   if ((repo.githubPackages || prev.githubPackages) && changed(repo.githubPackages, prev.githubPackages)) return true
@@ -1385,6 +1394,11 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   } else {
     done.rulesets = repo.rulesets
   }
+
+  if ((repo.actionsPolicies || prev.actionsPolicies) && changed(repo.actionsPolicies, prev.actionsPolicies)) {
+    await reconcileActionsPolicies(org, repo.name, repo.actionsPolicies || [], prev.actionsPolicies, dry)
+  }
+  done.actionsPolicies = repo.actionsPolicies
 
   await reconcileNpmBlock(org, repo, prev, dry, done)
 
@@ -1556,6 +1570,77 @@ async function reconcileForkPrContributorApproval(org, name, policy, dry) {
       body: { approval_policy: policy }
     })
   }
+}
+
+const ACTIONS_POLICY_ENFORCEMENT = ['active', 'evaluate', 'disabled']
+
+async function reconcileActionsPolicies(org, name, desired, prev, dry) {
+  const current = await getActionsPolicies(org, name)
+  const byName = new Map(current.map((p) => [p.name, p]))
+  const desiredNames = new Set(desired.map((p) => p.name))
+
+  // creates and updates run before removes, so renaming a policy never leaves the repo without one
+  for (const policy of desired) {
+    const body = actionsPolicyBody(org, name, policy)
+    const existing = byName.get(policy.name)
+    if (!existing) {
+      print(dry, 'create-actions-policy', `${org}/${name}`, policy.name)
+      if (!dry) await gh(['api', `repos/${org}/${name}/actions/policies`, '--method', 'POST', '--input', '-'], { body })
+      continue
+    }
+    if (actionsPolicyMatches(existing, body)) continue
+    // only the events rule is managed; other rules on the policy (actors) are carried over
+    body.rules.push(...(existing.rules || []).filter((r) => r.type !== 'restrict_action_events'))
+    print(dry, 'update-actions-policy', `${org}/${name}`, policy.name)
+    if (!dry) await gh(['api', `repos/${org}/${name}/actions/policies/${existing.id}`, '--method', 'PUT', '--input', '-'], { body })
+  }
+
+  for (const policy of prev || []) {
+    if (desiredNames.has(policy.name)) continue
+    const existing = byName.get(policy.name)
+    if (!existing) continue
+    print(dry, 'remove-actions-policy', `${org}/${name}`, policy.name)
+    if (!dry) await ghIgnoreNotFound(['api', `repos/${org}/${name}/actions/policies/${existing.id}`, '--method', 'DELETE'])
+  }
+}
+
+function actionsPolicyBody(org, name, policy) {
+  const where = org + '/' + name + ' actions policy "' + policy.name + '"'
+  const enforcement = policy.enforcement || 'active'
+  if (!ACTIONS_POLICY_ENFORCEMENT.includes(enforcement)) {
+    throw new Error('invalid enforcement "' + enforcement + '" for ' + where + ' (expected ' + ACTIONS_POLICY_ENFORCEMENT.join('|') + ')')
+  }
+  if (!Array.isArray(policy.events) || !policy.events.length) throw new Error(where + ': events must be a non-empty list')
+  // GitHub stores "all workflows" as ~ALL; sending it explicitly also clears targeting on update
+  return {
+    name: policy.name,
+    enforcement,
+    conditions: { workflow_path: { include: policy.workflows || ['~ALL'], exclude: [] } },
+    rules: [{ type: 'restrict_action_events', parameters: { allowed_events: policy.events } }]
+  }
+}
+
+function actionsPolicyMatches(current, body) {
+  if (current.enforcement !== body.enforcement) return false
+  const rule = (current.rules || []).find((r) => r.type === 'restrict_action_events')
+  if (!rule || !sameItems(rule.parameters.allowed_events, body.rules[0].parameters.allowed_events)) return false
+  const have = (current.conditions && current.conditions.workflow_path) || { include: ['~ALL'], exclude: [] }
+  const want = body.conditions.workflow_path
+  return sameItems(have.include, want.include) && sameItems(have.exclude, want.exclude)
+}
+
+function actionsPolicyConfig(policy) {
+  const out = { name: policy.name }
+  if (policy.enforcement !== 'active') out.enforcement = policy.enforcement
+  const rule = (policy.rules || []).find((r) => r.type === 'restrict_action_events')
+  out.events = rule.parameters.allowed_events
+  const wp = policy.conditions && policy.conditions.workflow_path
+  if (wp && wp.include && wp.include.length && !sameItems(wp.include, ['~ALL'])) out.workflows = wp.include
+  return out
+}
+
+function sameItems(a, b) {
+  return JSON.stringify([...(a || [])].sort()) === JSON.stringify([...(b || [])].sort())
 }
 
 async function reconcileCodeScanning(org, name, enabled, dry) {
@@ -2722,6 +2807,17 @@ function rulesetMatches(current, desired) {
     return false
 
   return true
+}
+
+// keep only policies defined on the repo itself; org and enterprise ones are changed at their own level.
+// The list omits rules and conditions, so each policy is fetched in full.
+async function getActionsPolicies(org, name) {
+  const res = JSON.parse(await gh(['api', `repos/${org}/${name}/actions/policies`]))
+  const out = []
+  for (const p of (res.policies || []).filter((p) => p.source_type === 'Repository')) {
+    out.push(JSON.parse(await gh(['api', `repos/${org}/${name}/actions/policies/${p.id}`])))
+  }
+  return out
 }
 
 async function getRulesets(org, name) {

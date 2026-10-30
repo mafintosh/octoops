@@ -200,7 +200,7 @@ Top-level repo fields for basic settings:
 
 Omitting a field leaves the current GitHub value untouched. Setting it makes octoops reconcile it.
 
-That holds for plain settings. Anything an apply created and recorded in state (teams, collaborators, topics, branch protection, rulesets, environments, secrets, npm trusted publishers, app repo access, org teams, org members, org secrets, runner groups, hosted runners) follows one rule: in state but no longer in the config means it is removed on the next apply. Removing a whole key is the same as emptying it. State is the only thing that drives this, so anything made by hand that no apply ever recorded is left alone; `resync` brings such things into state. The exceptions are a repo entry itself (needs `deleted: true`, see below) and values that cannot be unset, such as npm maintainers and deprecation.
+That holds for plain settings. Anything an apply created and recorded in state (teams, collaborators, topics, branch protection, rulesets, Actions policies, environments, secrets, npm trusted publishers, app repo access, org teams, org members, org secrets, runner groups, hosted runners) follows one rule: in state but no longer in the config means it is removed on the next apply. Removing a whole key is the same as emptying it. State is the only thing that drives this, so anything made by hand that no apply ever recorded is left alone; `resync` brings such things into state. The exceptions are a repo entry itself (needs `deleted: true`, see below) and values that cannot be unset, such as npm maintainers and deprecation.
 
 ### Sharing config across files
 
@@ -495,6 +495,28 @@ An environment in state that is no longer in the config is deleted (`remove-envi
 "environments": [
   { "name": "npm", "reviewers": [{ "team": "release" }], "preventSelfReview": true, "deploymentBranches": ["main", { "tag": "v*" }] },
   { "name": "staging", "deploymentBranches": "protected" }
+]
+```
+
+### Actions policies
+
+`actionsPolicies` declares repository Actions event policies (Settings → Actions → Policies). Each policy is an allowlist: only the listed events can start workflow runs in the workflows it targets. Each entry supports:
+
+- `name` — required. Policies are matched by name
+- `events` — required. Events allowed to trigger workflows, e.g. `["push", "pull_request", "pull_request_target"]`. Events left out are blocked
+- `enforcement` — `"active"` (default) | `"evaluate"` | `"disabled"`. `"evaluate"` only reports what would be blocked, under policy insights
+- `workflows` — workflow file paths the policy applies to. Omitted means every workflow in the repo
+
+A policy in state that is no longer in the config is deleted (`remove-actions-policy`). Creates and updates run before deletes. Only the events rule is managed: other rules on the policy, such as actor rules added by hand, are kept on update.
+
+GitHub blocks `pull_request_target` on public repos that have no applicable event policy. A repo that keeps using it needs a policy that lists it, together with every other event its workflows use:
+
+```json
+"actionsPolicies": [
+  {
+    "name": "allowed-events",
+    "events": ["push", "pull_request", "pull_request_target", "workflow_dispatch", "workflow_call", "schedule"]
+  }
 ]
 ```
 
