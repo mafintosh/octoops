@@ -963,6 +963,45 @@ For a project that already exists on PyPI, add the publisher on its own publishi
 
 Your workflow needs `permissions: id-token: write` and should use `pypa/gh-action-pypi-publish`. octoops does not manage the workflow file.
 
+### crates.io trusted publishing (OIDC)
+
+```json
+{
+  "org": "my-org",
+  "repos": [
+    {
+      "name": "my-crate",
+      "crates": {
+        "package": "my-crate",
+        "license": "Apache-2.0",
+        "trustedPublishing": {
+          "workflow": "publish.yml",
+          "environment": "crates"
+        }
+      }
+    }
+  ]
+}
+```
+
+Fields:
+
+- `package` — optional, defaults to the repo name. The crate name.
+- `license` — the SPDX license expression of the placeholder, required only when the crate doesn't exist yet. crates.io rejects a crate without one.
+- `trustedPublishing` — the GitHub Actions workflows that publish the crate, as for npm: a `workflow` and optional `environment`, or a list of them. crates.io allows up to 5 per crate.
+
+Behavior:
+
+crates.io only takes a trusted publisher for a crate that exists, so like npm, a placeholder 0.0.0 is published first if the crate isn't on crates.io yet (`crates-publish`). Its description is the repo's description and its repository the GitHub repo. The placeholder is published with `cargo publish`, so cargo must be logged in.
+
+Publishers are then reconciled through the crates.io API with the same rules as npm: a set keyed on `(workflow, environment)`, adds before revokes, and only GitHub publishers bound to this repo (`crates-trust` / `crates-untrust`). Unlike npm, crates.io never expires a publisher, so there is no renewal. A crate removed from the list (or the whole `crates` block), or one whose `trustedPublishing` is removed, has the publishers of this repo revoked. The crate itself is left alone.
+
+The API is called with the token cargo publishes with, from `CARGO_REGISTRY_TOKEN` or `cargo login` (`~/.cargo/credentials.toml`). It needs the `publish-new` scope for placeholders and the `trusted-publishing` scope for publishers. A token kept by a credential provider such as the macOS keychain can't be read, so pass it in `CARGO_REGISTRY_TOKEN` instead. For array form (multiple crates from one repo), pass a list of objects like `npm`.
+
+`--dry-run` checks whether each crate exists and prints each declared publisher without reading crates.io's publishers, so it shows what's declared rather than what would change.
+
+Your workflow needs `permissions: id-token: write` and should exchange its OIDC token with `rust-lang/crates-io-auth-action`. octoops does not manage the workflow file.
+
 ## Programmatic usage
 
 ```js

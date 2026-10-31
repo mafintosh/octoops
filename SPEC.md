@@ -70,6 +70,7 @@ reconciles actual state with desired state using `gh api` calls.
 7. Set up environments with team reviewers
 8. Apply rulesets (create or update by name)
 9. Set up npm trusted publishing (OIDC) if `npm` config present
+10. Set up crates.io trusted publishing (OIDC) if `crates` config present, publishing a placeholder 0.0.0 first for a crate that doesn't exist
 
 ## Behavior
 
