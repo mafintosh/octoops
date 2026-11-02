@@ -1396,7 +1396,7 @@ async function reconcile(org, repo, prev, dry, done, opts) {
 
   if (repo.pypi && changed(repo.pypi, prev.pypi)) {
     const pypis = Array.isArray(repo.pypi) ? repo.pypi : [repo.pypi]
-    for (const pypi of pypis) reconcilePypi(org, repo.name, pypi, dry)
+    for (const pypi of pypis) await reconcilePypi(org, repo.name, pypi, dry)
   }
   if (repo.pypi) done.pypi = repo.pypi
 
@@ -1404,13 +1404,13 @@ async function reconcile(org, repo, prev, dry, done, opts) {
 
   if (repo.nuget && changed(repo.nuget, prev.nuget)) {
     const nugets = Array.isArray(repo.nuget) ? repo.nuget : [repo.nuget]
-    for (const nuget of nugets) reconcileNuget(org, repo.name, nuget, dry)
+    for (const nuget of nugets) await reconcileNuget(org, repo.name, nuget, dry)
   }
   if (repo.nuget) done.nuget = repo.nuget
 
   if (repo.pubDev && changed(repo.pubDev, prev.pubDev)) {
     const pubDevs = Array.isArray(repo.pubDev) ? repo.pubDev : [repo.pubDev]
-    for (const pubDev of pubDevs) reconcilePubDev(org, repo.name, pubDev, dry)
+    for (const pubDev of pubDevs) await reconcilePubDev(org, repo.name, pubDev, dry)
   }
   if (repo.pubDev) done.pubDev = repo.pubDev
 
@@ -2766,7 +2766,7 @@ async function getDeploymentBranchPolicies(org, name, env) {
 }
 
 async function ensureNpmPackage(pkg, dry) {
-  const res = await run('npm', ['view', pkg, 'name'], { allowFailure: true })
+  const res = await npm(['view', pkg, 'name'], { allowFailure: true })
   if (res.code === 0 && res.stdout && res.stdout.trim() === pkg) return
 
   print(dry, 'npm-publish', pkg, 'placeholder 0.0.0')
@@ -2927,7 +2927,7 @@ async function listTrustedPublishers(pkg, repository, auth) {
   }
 
   // now re-run piped to capture JSON
-  const listed = parseTrustList(await run('npm', ['trust', 'list', pkg, '--json']))
+  const listed = parseTrustList(await npm(['trust', 'list', pkg, '--json']))
   return listed.filter((c) => c.type === 'github' && typeof c.repository === 'string' && sameName(c.repository, repository))
 }
 
@@ -3246,7 +3246,7 @@ function planTrustedPublishers(current, desired, renew) {
 async function reconcileNpmMaintainers(pkg, desired, dry) {
   let me = ''
   try {
-    me = (await run('npm', ['whoami'])).trim()
+    me = (await npm(['whoami'])).trim()
   } catch (err) {
     throw new Error('npm whoami failed - are you logged in? (' + err.message + ')')
   }
@@ -3255,7 +3255,7 @@ async function reconcileNpmMaintainers(pkg, desired, dry) {
   let exists = true
   let maintainers = []
   try {
-    const res = await run('npm', ['view', pkg, 'maintainers', '--json'], { allowFailure: true })
+    const res = await npm(['view', pkg, 'maintainers', '--json'], { allowFailure: true })
     if (res.code === 0) {
       const parsed = res.stdout ? JSON.parse(res.stdout) : []
       maintainers = Array.isArray(parsed) ? parsed : [parsed]
@@ -3323,7 +3323,7 @@ async function reconcileNpmMaintainers(pkg, desired, dry) {
 async function reconcileNpmDeprecation(pkg, deprecated, dry) {
   const message = deprecated === true ? 'This package is deprecated' : (deprecated || '')
 
-  const res = await run('npm', ['view', pkg, 'deprecated', '--json'], { allowFailure: true })
+  const res = await npm(['view', pkg, 'deprecated', '--json'], { allowFailure: true })
   if (res.code !== 0) {
     if (/404|E404|not found/i.test(res.stderr)) {
       print(dry, 'skip-deprecate', pkg, 'package not on npm yet, will sync on next apply')
@@ -3348,8 +3348,9 @@ async function reconcileNpmDeprecation(pkg, deprecated, dry) {
 
 // PyPI has no token/CLI to create trusted publishers (browser-only), so octoops
 // can't reconcile the PyPI side like it does npm. This prints the exact settings
-// to enter once on PyPI and records intent in state so re-applies stay quiet.
-function reconcilePypi(org, repoName, pypi, dry) {
+// to enter once on PyPI, waits for the user to confirm they did, and records
+// intent in state so re-applies stay quiet.
+async function reconcilePypi(org, repoName, pypi, dry) {
   const tp = pypi.trustedPublishing
   if (!tp) return
   if (!tp.workflow) {
@@ -3372,12 +3373,15 @@ function reconcilePypi(org, repoName, pypi, dry) {
     console.log(line)
     audit(line)
   }
+
+  if (dry || !process.stdin.isTTY) return
+  await confirm('Press enter once the trusted publisher is configured on PyPI, ctrl-c to abort')
 }
 
 // NuGet has no API to create trusted publishing policies (web UI only), so like
-// PyPI this prints the exact settings to enter once on nuget.org and records
-// intent in state so re-applies stay quiet.
-function reconcileNuget(org, repoName, nuget, dry) {
+// PyPI this prints the exact settings to enter once on nuget.org, waits for the
+// user to confirm they did, and records intent in state so re-applies stay quiet.
+async function reconcileNuget(org, repoName, nuget, dry) {
   const tp = nuget.trustedPublishing
   if (!tp) return
   if (!tp.workflow) {
@@ -3403,13 +3407,16 @@ function reconcileNuget(org, repoName, nuget, dry) {
     console.log(line)
     audit(line)
   }
+
+  if (dry || !process.stdin.isTTY) return
+  await confirm('Press enter once the trusted publishing policy is configured on NuGet, ctrl-c to abort')
 }
 
 // pub.dev has no API to enable automated publishing (web UI only), and only
 // offers it for a package that exists, so like PyPI this prints the exact
-// settings to enter once on pub.dev and records intent in state so re-applies
-// stay quiet.
-function reconcilePubDev(org, repoName, pubDev, dry) {
+// settings to enter once on pub.dev, waits for the user to confirm they did,
+// and records intent in state so re-applies stay quiet.
+async function reconcilePubDev(org, repoName, pubDev, dry) {
   const tp = pubDev.trustedPublishing
   if (!tp) return
   const pkg = pubDev.package || repoName
@@ -3427,6 +3434,9 @@ function reconcilePubDev(org, repoName, pubDev, dry) {
     console.log(line)
     audit(line)
   }
+
+  if (dry || !process.stdin.isTTY) return
+  await confirm('Press enter once automated publishing is enabled on pub.dev, ctrl-c to abort')
 }
 
 async function reconcileCratesBlock(org, repo, prev, dry, done) {
@@ -3957,6 +3967,33 @@ function readSecret(name) {
   })
 }
 
+// blocks until enter or ctrl-d on the tty, ctrl-c aborts
+function confirm(message) {
+  return new Promise((resolve, reject) => {
+    const stdin = process.stdin
+    process.stdout.write(message + ': ')
+    stdin.setRawMode(true)
+    stdin.setEncoding('utf8')
+    stdin.resume()
+
+    const onData = (chunk) => {
+      if (chunk.includes('\x03')) return finish(new Error('aborted'))
+      if (/[\x04\r\n]/.test(chunk)) return finish()
+    }
+
+    const finish = (err) => {
+      stdin.removeListener('data', onData)
+      stdin.setRawMode(false)
+      stdin.pause()
+      process.stdout.write('\n')
+      if (err) reject(err)
+      else resolve()
+    }
+
+    stdin.on('data', onData)
+  })
+}
+
 function slugify(name) {
   return name.toLowerCase().replace(/\s+/g, '-')
 }
@@ -3987,6 +4024,21 @@ async function gh(args, opts) {
       await new Promise((resolve) => setTimeout(resolve, LOCKED_WAIT))
     }
   }
+}
+
+// a one-time password buys a few minutes of npm access. when that runs out
+// mid-apply a piped command fails with 401 and nobody to ask, so it is rerun
+// on the tty for npm to prompt again, then piped once more for its output
+async function npm(args, opts = {}) {
+  let res = await run('npm', args, { ...opts, allowFailure: true })
+  if (res.code !== 0 && process.stdin.isTTY && /E401|EOTP|ENEEDAUTH|401 Unauthorized/.test(res.stderr + res.stdout)) {
+    console.log('  npm session expired, authenticating again')
+    await run('npm', args, { ...opts, interactive: true })
+    res = await run('npm', args, { ...opts, allowFailure: true })
+  }
+  if (opts.allowFailure) return res
+  if (res.code === 0) return res.stdout
+  throw new Error([res.stderr, res.stdout].filter(Boolean).join(' | ') || 'npm exited with code ' + res.code)
 }
 
 function run(cmd, args, opts = {}) {

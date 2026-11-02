@@ -815,7 +815,7 @@ Only direct collaborators are managed. Org-level implicit access is ignored. Unl
 }
 ```
 
-Sets up npm trusted publishing so GitHub Actions can publish via OIDC without npm tokens. If the package doesn't exist on npm yet, a placeholder 0.0.0 is published first. `package` defaults to the repo name if omitted, or to `<scope>/<repo-name>` if `scope` is set. Requires interactive npm authentication on first run.
+Sets up npm trusted publishing so GitHub Actions can publish via OIDC without npm tokens. If the package doesn't exist on npm yet, a placeholder 0.0.0 is published first. `package` defaults to the repo name if omitted, or to `<scope>/<repo-name>` if `scope` is set. Requires interactive npm authentication on first run. A one-time password only buys npm a few minutes of access, so when it runs out mid-apply and a command comes back 401, octoops reruns that command on the terminal for npm to prompt again and then carries on, instead of bailing.
 
 ```json
 {
@@ -946,7 +946,7 @@ Fields:
 
 Behavior:
 
-PyPI has no API token or CLI to create a trusted publisher — it's configured through a logged-in browser session only. So octoops can't reconcile the PyPI side. Instead, apply prints the exact settings to enter once on PyPI (a `pypi-manual` log line) and records the config in state so subsequent applies stay quiet:
+PyPI has no API token or CLI to create a trusted publisher — it's configured through a logged-in browser session only. So octoops can't reconcile the PyPI side. Instead, apply prints the exact settings to enter once on PyPI (a `pypi-manual` log line), pauses until you press enter to confirm you have entered them (ctrl-c aborts the apply), and records the config in state so subsequent applies stay quiet:
 
 ```
 pypi-manual my-lib (configure trusted publisher on PyPI)
@@ -957,9 +957,10 @@ pypi-manual my-lib (configure trusted publisher on PyPI)
     Environment:  pypi
     Existing project: https://pypi.org/manage/project/my-lib/settings/publishing/
     New project:      https://pypi.org/manage/account/publishing/ (add as a "pending publisher")
+Press enter once the trusted publisher is configured on PyPI, ctrl-c to abort:
 ```
 
-For a project that already exists on PyPI, add the publisher on its own publishing settings page. For a project that doesn't exist yet, add it as a "pending publisher" on the account page — the first publish then creates the project (no placeholder release needed). For multiple packages from one repo, pass a list of objects instead of one.
+The pause is skipped on dry runs and when stdin is not a terminal. For a project that already exists on PyPI, add the publisher on its own publishing settings page. For a project that doesn't exist yet, add it as a "pending publisher" on the account page — the first publish then creates the project (no placeholder release needed). For multiple packages from one repo, pass a list of objects instead of one.
 
 Your workflow needs `permissions: id-token: write` and should use `pypa/gh-action-pypi-publish`. octoops does not manage the workflow file.
 
@@ -1032,7 +1033,7 @@ Fields:
 
 Behavior:
 
-NuGet has no API token or CLI to create a trusted publishing policy — it's configured through a logged-in browser session only. So octoops can't reconcile the NuGet side. Instead, apply prints the exact settings to enter once on nuget.org (a `nuget-manual` log line) and records the config in state so subsequent applies stay quiet:
+NuGet has no API token or CLI to create a trusted publishing policy — it's configured through a logged-in browser session only. So octoops can't reconcile the NuGet side. Instead, apply prints the exact settings to enter once on nuget.org (a `nuget-manual` log line), pauses until you press enter to confirm you have entered them (ctrl-c aborts the apply), and records the config in state so subsequent applies stay quiet:
 
 ```
 nuget-manual MyOrg.MyLib (configure trusted publishing policy on NuGet)
@@ -1043,9 +1044,10 @@ nuget-manual MyOrg.MyLib (configure trusted publishing policy on NuGet)
     Workflow:         publish.yml
     Environment:      nuget
     Policies:         Trusted Publishing in the nuget.org account menu, signed in as a member of the policy owner
+Press enter once the trusted publishing policy is configured on NuGet, ctrl-c to abort:
 ```
 
-A policy can be added before the package exists, so the first publish creates it (no placeholder release needed). A policy owned by an organization stops working while the member who created it is not in the organization, so create it from an account that stays a member. For multiple packages from one repo, pass a list of objects instead of one.
+The pause is skipped on dry runs and when stdin is not a terminal. A policy can be added before the package exists, so the first publish creates it (no placeholder release needed). A policy owned by an organization stops working while the member who created it is not in the organization, so create it from an account that stays a member. For multiple packages from one repo, pass a list of objects instead of one.
 
 Your workflow needs `permissions: id-token: write` and should exchange its OIDC token with `NuGet/login`, passing the nuget.org username of the member who created the policy. octoops does not manage the workflow file.
 
@@ -1077,7 +1079,7 @@ Fields:
 
 Behavior:
 
-pub.dev has no API token or CLI to enable automated publishing — it's enabled through a logged-in browser session on the package's Admin tab only. So octoops can't reconcile the pub.dev side. Instead, apply prints the exact settings to enter once on pub.dev (a `pub-dev-manual` log line) and records the config in state so subsequent applies stay quiet:
+pub.dev has no API token or CLI to enable automated publishing — it's enabled through a logged-in browser session on the package's Admin tab only. So octoops can't reconcile the pub.dev side. Instead, apply prints the exact settings to enter once on pub.dev (a `pub-dev-manual` log line), pauses until you press enter to confirm you have entered them (ctrl-c aborts the apply), and records the config in state so subsequent applies stay quiet:
 
 ```
 pub-dev-manual my_lib (enable automated publishing on pub.dev)
@@ -1086,9 +1088,10 @@ pub-dev-manual my_lib (enable automated publishing on pub.dev)
     Tag pattern:  v{{version}}
     Environment:  pub-dev
     Admin:        https://pub.dev/packages/my_lib/admin (publish the first version by hand if the package does not exist)
+Press enter once automated publishing is enabled on pub.dev, ctrl-c to abort:
 ```
 
-pub.dev only offers automated publishing for a package that exists, and never deletes a version, so an uploader publishes the first version by hand with `dart pub publish`. For multiple packages from one repo, pass a list of objects instead of one.
+The pause is skipped on dry runs and when stdin is not a terminal. pub.dev only offers automated publishing for a package that exists, and never deletes a version, so an uploader publishes the first version by hand with `dart pub publish`. For multiple packages from one repo, pass a list of objects instead of one.
 
 Your workflow needs `permissions: id-token: write` and should run `dart pub publish --force` on a tag push, such as through `dart-lang/setup-dart`. octoops does not manage the workflow file.
 
