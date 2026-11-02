@@ -469,6 +469,7 @@ function seed(config, opts = {}) {
     if (repo.rulesets) entry.rulesets = repo.rulesets
     if (repo.npm) entry.npm = repo.npm
     if (repo.pypi) entry.pypi = repo.pypi
+    if (repo.crates) entry.crates = repo.crates
     if (repo.githubPackages) entry.githubPackages = repo.githubPackages
     state[key] = entry
   }
@@ -1021,7 +1022,7 @@ const REPO_KEYS = new Set([
   'merging', 'topics',
   'teams', 'collaborators',
   'branchProtection', 'environments', 'rulesets',
-  'npm', 'pypi', 'secrets', 'security',
+  'npm', 'pypi', 'crates', 'secrets', 'security',
   'actionsAccess', 'forkPrContributorApproval', 'githubPackages', 'pages',
   'defaults', 'presets', 'renamedFrom'
 ])
@@ -1230,6 +1231,7 @@ function repoChanged(repo, prev, opts) {
   if ((repo.rulesets || prev.rulesets) && changed(repo.rulesets, prev.rulesets)) return true
   if ((repo.npm || prev.npm) && changed(repo.npm, prev.npm)) return true
   if ((repo.pypi || prev.pypi) && changed(repo.pypi, prev.pypi)) return true
+  if ((repo.crates || prev.crates) && changed(repo.crates, prev.crates)) return true
   if ((repo.githubPackages || prev.githubPackages) && changed(repo.githubPackages, prev.githubPackages)) return true
   if (repo.actionsAccess !== undefined && repo.actionsAccess !== prev.actionsAccess) return true
   if (repo.forkPrContributorApproval !== undefined && repo.forkPrContributorApproval !== prev.forkPrContributorApproval) return true
@@ -1393,6 +1395,8 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     for (const pypi of pypis) reconcilePypi(org, repo.name, pypi, dry)
   }
   if (repo.pypi) done.pypi = repo.pypi
+
+  await reconcileCratesBlock(org, repo, prev, dry, done)
 
   if (repo.githubPackages && changed(repo.githubPackages, prev.githubPackages)) {
     await reconcileGithubPackages(org, repo.name, repo.githubPackages, dry)
@@ -2800,17 +2804,17 @@ function npmPackageName(npm, repoName) {
   return npm.package || npm.name || (npm.scope ? (npm.scope.startsWith('@') ? npm.scope : '@' + npm.scope) + '/' + repoName : repoName)
 }
 
-function desiredTrustedPublishers(org, repoName, tp) {
+function desiredTrustedPublishers(org, repoName, tp, registry = 'npm') {
   const repository = `${org}/${repoName}`
   const seen = new Set()
   const desired = []
 
   for (const e of Array.isArray(tp) ? tp : [tp]) {
     if (!e.workflow) {
-      throw new Error('npm.trustedPublishing.workflow is required for ' + repository)
+      throw new Error(registry + '.trustedPublishing.workflow is required for ' + repository)
     }
     const entry = { repository, file: e.workflow, environment: e.environment || null }
-    // declaring the same triple twice would make the second npm trust call fail
+    // declaring the same triple twice would make the second trust call fail
     if (seen.has(trustKey(entry))) continue
     seen.add(trustKey(entry))
     desired.push(entry)
@@ -3352,6 +3356,178 @@ function reconcilePypi(org, repoName, pypi, dry) {
     console.log(line)
     audit(line)
   }
+}
+
+async function reconcileCratesBlock(org, repo, prev, dry, done) {
+  if (!repo.crates && !prev.crates) return
+  if (changed(repo.crates, prev.crates)) {
+    const crates = Array.isArray(repo.crates) ? repo.crates : repo.crates ? [repo.crates] : []
+    const prevs = Array.isArray(prev.crates) ? prev.crates : prev.crates ? [prev.crates] : []
+    // each crate is its own unit of change, like npm packages
+    for (const krate of crates) {
+      const name = crateName(krate, repo.name)
+      const was = prevs.find((p) => crateName(p, repo.name) === name)
+      if (was && !changed(krate, was)) continue
+      await reconcileCrate(org, repo, krate, was, dry)
+    }
+    // a crate gone from the config has the publishers of this repo revoked,
+    // the crate itself and its owners stay
+    const desired = new Set(crates.map((c) => crateName(c, repo.name)))
+    for (const was of prevs) {
+      const name = crateName(was, repo.name)
+      if (desired.has(name) || was.trustedPublishing === undefined) continue
+      await reconcileCratePublishers(name, org, repo.name, [], dry)
+    }
+  }
+  // recorded only after the work succeeded, so a failed publish or API call
+  // is retried by the next apply
+  done.crates = repo.crates
+}
+
+function crateName(krate, repoName) {
+  return krate.package || repoName
+}
+
+async function reconcileCrate(org, repo, krate, was, dry) {
+  const name = crateName(krate, repo.name)
+  const tp = krate.trustedPublishing
+  // publishers declared by the previous entry were set up by an earlier apply,
+  // so the entry no longer declaring them means they are to go
+  const dropping = tp === undefined && was !== undefined && was.trustedPublishing !== undefined
+
+  if (tp === undefined && !dropping) return
+
+  const desired = tp === undefined ? [] : desiredTrustedPublishers(org, repo.name, tp, 'crates')
+
+  if (desired.length) await ensureCrate(org, repo, krate, dry)
+
+  await reconcileCratePublishers(name, org, repo.name, desired, dry)
+}
+
+// crates.io only takes trusted publishers for a crate that exists, so a
+// placeholder 0.0.0 is published first, as for npm
+async function ensureCrate(org, repo, krate, dry) {
+  const name = crateName(krate, repo.name)
+  const res = await fetch('https://crates.io/api/v1/crates/' + encodeURIComponent(name), {
+    headers: { 'user-agent': CRATES_USER_AGENT }
+  })
+  if (res.ok) return
+  if (res.status !== 404) throw new Error('crates.io returned ' + res.status + ' for ' + name)
+
+  print(dry, 'crates-publish', name, 'placeholder 0.0.0')
+  if (dry) return
+
+  // crates.io rejects a crate without a description or license
+  if (!krate.license) throw new Error('crates.license is required to publish the placeholder of ' + name)
+
+  const manifest = [
+    '[package]',
+    'name = ' + JSON.stringify(name),
+    'version = "0.0.0"',
+    'edition = "2021"',
+    'description = ' + JSON.stringify(repo.description || name),
+    'license = ' + JSON.stringify(krate.license),
+    'repository = ' + JSON.stringify(`https://github.com/${org}/${repo.name}`),
+    ''
+  ]
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'octoops-'))
+  try {
+    fs.mkdirSync(path.join(tmp, 'src'))
+    fs.writeFileSync(path.join(tmp, 'src', 'lib.rs'), '')
+    fs.writeFileSync(path.join(tmp, 'Cargo.toml'), manifest.join('\n'))
+    await run('cargo', ['publish', '--no-verify'], { cwd: tmp, interactive: true })
+  } finally {
+    fs.rmSync(tmp, { recursive: true })
+  }
+}
+
+// converges the GitHub publishers of this repo on desired. publishers bound to
+// another repo are left alone, and adds run before revokes so an interrupted
+// apply leaves a crate with too many publishers rather than none
+async function reconcileCratePublishers(name, org, repoName, desired, dry) {
+  if (dry) {
+    for (const d of desired) print(dry, 'crates-trust', name, publisherLabel(d))
+    if (!desired.length) print(dry, 'crates-untrust', name, `${org}/${repoName}`)
+    return
+  }
+
+  const token = cratesToken()
+  const res = await cratesApi('GET', '/trusted_publishing/github_configs?crate=' + encodeURIComponent(name), token)
+  const listed = res.github_configs
+    .filter((c) => sameName(c.repository_owner, org) && sameName(c.repository_name, repoName))
+    .map((c) => ({ id: c.id, file: c.workflow_filename, environment: c.environment || null }))
+
+  const have = new Set(listed.map(trustKey))
+  const want = new Set(desired.map(trustKey))
+
+  for (const d of desired) {
+    if (have.has(trustKey(d))) continue
+    print(dry, 'crates-trust', name, publisherLabel(d))
+    await cratesApi('POST', '/trusted_publishing/github_configs', token, {
+      github_config: {
+        crate: name,
+        repository_owner: org,
+        repository_name: repoName,
+        workflow_filename: d.file,
+        environment: d.environment
+      }
+    })
+  }
+
+  for (const c of listed) {
+    if (want.has(trustKey(c))) continue
+    print(dry, 'crates-untrust', name, publisherLabel(c))
+    await cratesApi('DELETE', '/trusted_publishing/github_configs/' + c.id, token)
+  }
+}
+
+const CRATES_USER_AGENT = 'octoops (https://github.com/mafintosh/octoops)'
+
+// the token cargo publishes with, which needs the publish-new and
+// trusted-publishing scopes
+function cratesToken() {
+  if (process.env.CARGO_REGISTRY_TOKEN) return process.env.CARGO_REGISTRY_TOKEN
+
+  const home = process.env.CARGO_HOME || path.join(os.homedir(), '.cargo')
+  for (const file of ['credentials.toml', 'credentials']) {
+    let content
+    try {
+      content = fs.readFileSync(path.join(home, file), 'utf-8')
+    } catch {
+      continue
+    }
+    const match = content.match(/^\[registry\][^[]*?^token\s*=\s*"([^"]+)"/m)
+    if (match) return match[1]
+  }
+
+  throw new Error('no crates.io token, run `cargo login` or set CARGO_REGISTRY_TOKEN')
+}
+
+async function cratesApi(method, pathname, token, body) {
+  const line = '> crates.io ' + method + ' ' + pathname
+  console.log(line)
+  audit(line)
+
+  const res = await fetch('https://crates.io/api/v1' + pathname, {
+    method,
+    headers: {
+      authorization: token,
+      'user-agent': CRATES_USER_AGENT,
+      ...(body ? { 'content-type': 'application/json' } : {})
+    },
+    body: body ? JSON.stringify(body) : undefined
+  })
+
+  if (!res.ok) {
+    let detail = res.statusText
+    try {
+      detail = (await res.json()).errors.map((e) => e.detail).join(', ')
+    } catch {}
+    throw new Error('crates.io ' + method + ' ' + pathname + ' failed with ' + res.status + ': ' + detail)
+  }
+
+  return res.status === 204 ? null : res.json()
 }
 
 async function getRepo(org, name) {
