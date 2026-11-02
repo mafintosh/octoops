@@ -946,7 +946,7 @@ Fields:
 
 Behavior:
 
-Unlike npm, PyPI has no API token or CLI to create a trusted publisher — it's configured through a logged-in browser session only. So octoops can't reconcile the PyPI side. Instead, apply prints the exact settings to enter once on PyPI (a `pypi-manual` log line) and records the config in state so subsequent applies stay quiet:
+PyPI has no API token or CLI to create a trusted publisher — it's configured through a logged-in browser session only. So octoops can't reconcile the PyPI side. Instead, apply prints the exact settings to enter once on PyPI (a `pypi-manual` log line) and records the config in state so subsequent applies stay quiet:
 
 ```
 pypi-manual my-lib (configure trusted publisher on PyPI)
@@ -959,7 +959,7 @@ pypi-manual my-lib (configure trusted publisher on PyPI)
     New project:      https://pypi.org/manage/account/publishing/ (add as a "pending publisher")
 ```
 
-For a project that already exists on PyPI, add the publisher on its own publishing settings page. For a project that doesn't exist yet, add it as a "pending publisher" on the account page — the first publish then creates the project (no placeholder release needed). For array form (multiple packages from one repo), pass a list of objects like `npm`.
+For a project that already exists on PyPI, add the publisher on its own publishing settings page. For a project that doesn't exist yet, add it as a "pending publisher" on the account page — the first publish then creates the project (no placeholder release needed). For multiple packages from one repo, pass a list of objects instead of one.
 
 Your workflow needs `permissions: id-token: write` and should use `pypa/gh-action-pypi-publish`. octoops does not manage the workflow file.
 
@@ -988,19 +988,109 @@ Fields:
 
 - `package` — optional, defaults to the repo name. The crate name.
 - `license` — the SPDX license expression of the placeholder, required only when the crate doesn't exist yet. crates.io rejects a crate without one.
-- `trustedPublishing` — the GitHub Actions workflows that publish the crate, as for npm: a `workflow` and optional `environment`, or a list of them. crates.io allows up to 5 per crate.
+- `trustedPublishing` — the GitHub Actions workflows that publish the crate: a `workflow` and optional `environment`, or a list of them for several workflows. crates.io allows up to 5 per crate.
 
 Behavior:
 
-crates.io only takes a trusted publisher for a crate that exists, so like npm, a placeholder 0.0.0 is published first if the crate isn't on crates.io yet (`crates-publish`). Its description is the repo's description and its repository the GitHub repo. The placeholder is published with `cargo publish`, so cargo must be logged in.
+crates.io only takes a trusted publisher for a crate that exists, so a placeholder 0.0.0 is published first if the crate isn't on crates.io yet (`crates-publish`). Its description is the repo's description and its repository the GitHub repo. The placeholder is published with `cargo publish`, so cargo must be logged in.
 
-Publishers are then reconciled through the crates.io API with the same rules as npm: a set keyed on `(workflow, environment)`, adds before revokes, and only GitHub publishers bound to this repo (`crates-trust` / `crates-untrust`). Unlike npm, crates.io never expires a publisher, so there is no renewal. A crate removed from the list (or the whole `crates` block), or one whose `trustedPublishing` is removed, has the publishers of this repo revoked. The crate itself is left alone.
+Publishers are then reconciled through the crates.io API as a set keyed on `(workflow, environment)`: declared but missing gets added (`crates-trust`), present but undeclared gets revoked (`crates-untrust`), and anything already matching is left alone. Adds run before revokes, so an interrupted apply leaves a crate with too many publishers rather than none. Only GitHub publishers bound to this repo are reconciled; others are left alone. crates.io never expires a publisher, so there is no renewal. A crate removed from the list (or the whole `crates` block), or one whose `trustedPublishing` is removed, has the publishers of this repo revoked. The crate itself is left alone.
 
-The API is called with the token cargo publishes with, from `CARGO_REGISTRY_TOKEN` or `cargo login` (`~/.cargo/credentials.toml`). It needs the `publish-new` scope for placeholders and the `trusted-publishing` scope for publishers. A token kept by a credential provider such as the macOS keychain can't be read, so pass it in `CARGO_REGISTRY_TOKEN` instead. For array form (multiple crates from one repo), pass a list of objects like `npm`.
+The API is called with the token cargo publishes with, from `CARGO_REGISTRY_TOKEN` or `cargo login` (`~/.cargo/credentials.toml`). It needs the `publish-new` scope for placeholders and the `trusted-publishing` scope for publishers. A token kept by a credential provider such as the macOS keychain can't be read, so pass it in `CARGO_REGISTRY_TOKEN` instead. For multiple crates from one repo, pass a list of objects instead of one.
 
 `--dry-run` checks whether each crate exists and prints each declared publisher without reading crates.io's publishers, so it shows what's declared rather than what would change.
 
 Your workflow needs `permissions: id-token: write` and should exchange its OIDC token with `rust-lang/crates-io-auth-action`. octoops does not manage the workflow file.
+
+### NuGet trusted publishing (OIDC)
+
+```json
+{
+  "org": "my-org",
+  "repos": [
+    {
+      "name": "my-lib",
+      "nuget": {
+        "package": "MyOrg.MyLib",
+        "owner": "MyOrg",
+        "trustedPublishing": {
+          "workflow": "publish.yml",
+          "environment": "nuget"
+        }
+      }
+    }
+  ]
+}
+```
+
+Fields:
+
+- `package` — optional, defaults to the repo name. The NuGet package ID.
+- `owner` — required. The nuget.org account that owns the policy, either a user or an organization. A policy applies to the packages its owner owns.
+- `trustedPublishing.workflow` — required. The GitHub Actions workflow file that publishes (e.g. `publish.yml`).
+- `trustedPublishing.environment` — optional. The deployment environment the workflow uses. Referenced only — octoops does not create it. If you want a protected environment (reviewers etc.), declare it under `environments` as usual; the `nuget` block just names it.
+
+Behavior:
+
+NuGet has no API token or CLI to create a trusted publishing policy — it's configured through a logged-in browser session only. So octoops can't reconcile the NuGet side. Instead, apply prints the exact settings to enter once on nuget.org (a `nuget-manual` log line) and records the config in state so subsequent applies stay quiet:
+
+```
+nuget-manual MyOrg.MyLib (configure trusted publishing policy on NuGet)
+    Package:          MyOrg.MyLib
+    Policy owner:     MyOrg
+    Repository owner: my-org
+    Repository:       my-lib
+    Workflow:         publish.yml
+    Environment:      nuget
+    Policies:         Trusted Publishing in the nuget.org account menu, signed in as a member of the policy owner
+```
+
+A policy can be added before the package exists, so the first publish creates it (no placeholder release needed). A policy owned by an organization stops working while the member who created it is not in the organization, so create it from an account that stays a member. For multiple packages from one repo, pass a list of objects instead of one.
+
+Your workflow needs `permissions: id-token: write` and should exchange its OIDC token with `NuGet/login`, passing the nuget.org username of the member who created the policy. octoops does not manage the workflow file.
+
+### pub.dev automated publishing (OIDC)
+
+```json
+{
+  "org": "my-org",
+  "repos": [
+    {
+      "name": "my-lib",
+      "pubDev": {
+        "package": "my_lib",
+        "trustedPublishing": {
+          "tagPattern": "v{{version}}",
+          "environment": "pub-dev"
+        }
+      }
+    }
+  ]
+}
+```
+
+Fields:
+
+- `package` — optional, defaults to the repo name. The pub.dev package name.
+- `trustedPublishing.tagPattern` — optional, defaults to `v{{version}}`. The pattern of the tags whose pushes may publish. pub.dev names no workflow file, only the tags it accepts.
+- `trustedPublishing.environment` — optional. The deployment environment the workflow must use. Referenced only — octoops does not create it. If you want a protected environment (reviewers etc.), declare it under `environments` as usual; the `pubDev` block just names it.
+
+Behavior:
+
+pub.dev has no API token or CLI to enable automated publishing — it's enabled through a logged-in browser session on the package's Admin tab only. So octoops can't reconcile the pub.dev side. Instead, apply prints the exact settings to enter once on pub.dev (a `pub-dev-manual` log line) and records the config in state so subsequent applies stay quiet:
+
+```
+pub-dev-manual my_lib (enable automated publishing on pub.dev)
+    Package:      my_lib
+    Repository:   my-org/my-lib
+    Tag pattern:  v{{version}}
+    Environment:  pub-dev
+    Admin:        https://pub.dev/packages/my_lib/admin (publish the first version by hand if the package does not exist)
+```
+
+pub.dev only offers automated publishing for a package that exists, and never deletes a version, so an uploader publishes the first version by hand with `dart pub publish`. For multiple packages from one repo, pass a list of objects instead of one.
+
+Your workflow needs `permissions: id-token: write` and should run `dart pub publish --force` on a tag push, such as through `dart-lang/setup-dart`. octoops does not manage the workflow file.
 
 ## Programmatic usage
 
