@@ -470,6 +470,8 @@ function seed(config, opts = {}) {
     if (repo.npm) entry.npm = repo.npm
     if (repo.pypi) entry.pypi = repo.pypi
     if (repo.crates) entry.crates = repo.crates
+    if (repo.nuget) entry.nuget = repo.nuget
+    if (repo.pubDev) entry.pubDev = repo.pubDev
     if (repo.githubPackages) entry.githubPackages = repo.githubPackages
     state[key] = entry
   }
@@ -1022,7 +1024,7 @@ const REPO_KEYS = new Set([
   'merging', 'topics',
   'teams', 'collaborators',
   'branchProtection', 'environments', 'rulesets',
-  'npm', 'pypi', 'crates', 'secrets', 'security',
+  'npm', 'pypi', 'crates', 'nuget', 'pubDev', 'secrets', 'security',
   'actionsAccess', 'forkPrContributorApproval', 'githubPackages', 'pages',
   'defaults', 'presets', 'renamedFrom'
 ])
@@ -1232,6 +1234,8 @@ function repoChanged(repo, prev, opts) {
   if ((repo.npm || prev.npm) && changed(repo.npm, prev.npm)) return true
   if ((repo.pypi || prev.pypi) && changed(repo.pypi, prev.pypi)) return true
   if ((repo.crates || prev.crates) && changed(repo.crates, prev.crates)) return true
+  if ((repo.nuget || prev.nuget) && changed(repo.nuget, prev.nuget)) return true
+  if ((repo.pubDev || prev.pubDev) && changed(repo.pubDev, prev.pubDev)) return true
   if ((repo.githubPackages || prev.githubPackages) && changed(repo.githubPackages, prev.githubPackages)) return true
   if (repo.actionsAccess !== undefined && repo.actionsAccess !== prev.actionsAccess) return true
   if (repo.forkPrContributorApproval !== undefined && repo.forkPrContributorApproval !== prev.forkPrContributorApproval) return true
@@ -1397,6 +1401,18 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   if (repo.pypi) done.pypi = repo.pypi
 
   await reconcileCratesBlock(org, repo, prev, dry, done)
+
+  if (repo.nuget && changed(repo.nuget, prev.nuget)) {
+    const nugets = Array.isArray(repo.nuget) ? repo.nuget : [repo.nuget]
+    for (const nuget of nugets) reconcileNuget(org, repo.name, nuget, dry)
+  }
+  if (repo.nuget) done.nuget = repo.nuget
+
+  if (repo.pubDev && changed(repo.pubDev, prev.pubDev)) {
+    const pubDevs = Array.isArray(repo.pubDev) ? repo.pubDev : [repo.pubDev]
+    for (const pubDev of pubDevs) reconcilePubDev(org, repo.name, pubDev, dry)
+  }
+  if (repo.pubDev) done.pubDev = repo.pubDev
 
   if (repo.githubPackages && changed(repo.githubPackages, prev.githubPackages)) {
     await reconcileGithubPackages(org, repo.name, repo.githubPackages, dry)
@@ -3351,6 +3367,61 @@ function reconcilePypi(org, repoName, pypi, dry) {
     '    Environment:  ' + (tp.environment || '(none)'),
     '    Existing project: https://pypi.org/manage/project/' + pkg + '/settings/publishing/',
     '    New project:      https://pypi.org/manage/account/publishing/ (add as a "pending publisher")'
+  ]
+  for (const line of lines) {
+    console.log(line)
+    audit(line)
+  }
+}
+
+// NuGet has no API to create trusted publishing policies (web UI only), so like
+// PyPI this prints the exact settings to enter once on nuget.org and records
+// intent in state so re-applies stay quiet.
+function reconcileNuget(org, repoName, nuget, dry) {
+  const tp = nuget.trustedPublishing
+  if (!tp) return
+  if (!tp.workflow) {
+    throw new Error('nuget.trustedPublishing.workflow is required for ' + org + '/' + repoName)
+  }
+  if (!nuget.owner) {
+    throw new Error('nuget.owner is required for ' + org + '/' + repoName)
+  }
+  const pkg = nuget.package || repoName
+
+  print(dry, 'nuget-manual', pkg, 'configure trusted publishing policy on NuGet')
+
+  const lines = [
+    '    Package:          ' + pkg,
+    '    Policy owner:     ' + nuget.owner,
+    '    Repository owner: ' + org,
+    '    Repository:       ' + repoName,
+    '    Workflow:         ' + tp.workflow,
+    '    Environment:      ' + (tp.environment || '(none)'),
+    '    Policies:         Trusted Publishing in the nuget.org account menu, signed in as a member of the policy owner'
+  ]
+  for (const line of lines) {
+    console.log(line)
+    audit(line)
+  }
+}
+
+// pub.dev has no API to enable automated publishing (web UI only), and only
+// offers it for a package that exists, so like PyPI this prints the exact
+// settings to enter once on pub.dev and records intent in state so re-applies
+// stay quiet.
+function reconcilePubDev(org, repoName, pubDev, dry) {
+  const tp = pubDev.trustedPublishing
+  if (!tp) return
+  const pkg = pubDev.package || repoName
+
+  print(dry, 'pub-dev-manual', pkg, 'enable automated publishing on pub.dev')
+
+  const lines = [
+    '    Package:      ' + pkg,
+    '    Repository:   ' + org + '/' + repoName,
+    '    Tag pattern:  ' + (tp.tagPattern || 'v{{version}}'),
+    '    Environment:  ' + (tp.environment || '(none)'),
+    '    Admin:        https://pub.dev/packages/' + pkg + '/admin (publish the first version by hand if the package does not exist)'
   ]
   for (const line of lines) {
     console.log(line)
