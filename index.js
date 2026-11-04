@@ -221,6 +221,15 @@ async function importRepo(org, name) {
     }))
   }
 
+  const deployKeys = await getDeployKeys(org, name)
+  if (deployKeys.length) {
+    entry.deployKeys = deployKeys.map((k) => {
+      const key = { title: k.title, key: k.key }
+      if (!k.read_only) key.readOnly = false
+      return key
+    })
+  }
+
   try {
     const bp = JSON.parse(
       await gh(['api', `repos/${org}/${name}/branches/${repo.default_branch}/protection`])
@@ -464,6 +473,7 @@ function seed(config, opts = {}) {
     if (repo.topics) entry.topics = repo.topics
     if (repo.teams) entry.teams = repo.teams
     if (repo.collaborators) entry.collaborators = repo.collaborators
+    if (repo.deployKeys) entry.deployKeys = repo.deployKeys
     if (repo.branchProtection) entry.branchProtection = repo.branchProtection
     if (repo.environments) entry.environments = repo.environments
     if (repo.rulesets) entry.rulesets = repo.rulesets
@@ -1022,7 +1032,7 @@ const REPO_KEYS = new Set([
   'private', 'internal',
   'defaultBranch', 'wiki', 'projects', 'issues', 'discussions', 'archived', 'deleted', 'init', 'template',
   'merging', 'topics',
-  'teams', 'collaborators',
+  'teams', 'collaborators', 'deployKeys',
   'branchProtection', 'environments', 'rulesets',
   'npm', 'pypi', 'crates', 'nuget', 'pubDev', 'secrets', 'security',
   'actionsAccess', 'forkPrContributorApproval', 'githubPackages', 'pages',
@@ -1228,6 +1238,7 @@ function repoChanged(repo, prev, opts) {
   if ((repo.topics || prev.topics) && changed(repo.topics, prev.topics)) return true
   if ((repo.teams || prev.teams) && changed(repo.teams, prev.teams)) return true
   if ((repo.collaborators || prev.collaborators) && changed(repo.collaborators, prev.collaborators)) return true
+  if ((repo.deployKeys || prev.deployKeys) && changed(repo.deployKeys, prev.deployKeys)) return true
   if (changed(repo.branchProtection, prev.branchProtection)) return true
   if (changed(repo.environments, prev.environments)) return true
   if ((repo.rulesets || prev.rulesets) && changed(repo.rulesets, prev.rulesets)) return true
@@ -1342,6 +1353,12 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     done.collaborators = await reconcileCollaborators(org, repo.name, repo.collaborators || [], prev.collaborators, dry)
   } else {
     done.collaborators = repo.collaborators
+  }
+
+  if ((repo.deployKeys || prev.deployKeys) && changed(repo.deployKeys, prev.deployKeys)) {
+    done.deployKeys = await reconcileDeployKeys(org, repo.name, repo.deployKeys, prev.deployKeys, dry)
+  } else {
+    done.deployKeys = repo.deployKeys
   }
 
   if (changed(repo.branchProtection, prev.branchProtection)) {
@@ -2164,6 +2181,104 @@ async function getCollaborators(org, name) {
     return JSON.parse(
       await gh(['api', `repos/${org}/${name}/collaborators?affiliation=direct`, '--paginate'])
     )
+  } catch {
+    return []
+  }
+}
+
+// a deploy key is create/list/delete only on github, its title, key and
+// read-only flag are fixed once made, so a changed one is deleted and made
+// again. the title is the identity, like username on collaborators
+async function reconcileDeployKeys(org, name, desired, prev, dry) {
+  const keys = Array.isArray(desired) ? desired : desired ? [desired] : []
+  const prevs = Array.isArray(prev) ? prev : prev ? [prev] : []
+
+  for (const k of keys) {
+    if (!k.title) throw new Error('deployKeys[].title is required for ' + org + '/' + name)
+    if (!k.key) throw new Error('deployKeys[].key is required for ' + org + '/' + name + ' (' + k.title + ')')
+  }
+
+  const desiredMap = new Map(keys.map((k) => [k.title, k]))
+  const prevMap = new Map(prevs.map((k) => [k.title, k]))
+
+  // dry runs diff config against state only, like crates
+  const live = dry ? [] : await getDeployKeys(org, name)
+  const liveMap = new Map(live.map((k) => [k.title, k]))
+
+  const applied = []
+
+  for (const [title, k] of desiredMap) {
+    const was = prevMap.get(title)
+    const current = liveMap.get(title)
+    const readOnly = k.readOnly !== false
+    const mode = readOnly ? 'read-only' : 'read-write'
+
+    if (dry) {
+      if (!was) print(dry, 'deploy-key', `${org}/${name}`, `${title} ${mode}`)
+      else if (!sameDeployKey(k, was)) print(dry, 'deploy-key', `${org}/${name}`, `${title} ${mode}, replaced`)
+      applied.push(k)
+      continue
+    }
+
+    if (current && sameDeployKey(k, current)) {
+      applied.push(k)
+      continue
+    }
+
+    if (current) {
+      print(dry, 'deploy-key', `${org}/${name}`, `${title} ${mode}, replaced`)
+      await gh(['api', `repos/${org}/${name}/keys/${current.id}`, '--method', 'DELETE'])
+    } else {
+      print(dry, 'deploy-key', `${org}/${name}`, `${title} ${mode}`)
+    }
+
+    try {
+      await gh(['api', `repos/${org}/${name}/keys`, '--method', 'POST', '--input', '-'], {
+        body: { title, key: k.key.trim(), read_only: readOnly }
+      })
+    } catch (err) {
+      if (/key is already in use/i.test(err.message)) {
+        throw new Error('deploy key "' + title + '" for ' + org + '/' + name + ' is already attached to another repo, github allows a key on one repo only')
+      }
+      throw err
+    }
+    applied.push(k)
+  }
+
+  // keys octoops made and the config no longer declares go, keys it never
+  // recorded are left alone, like direct collaborators vs implicit access
+  for (const [title] of prevMap) {
+    if (desiredMap.has(title)) continue
+    print(dry, 'remove-deploy-key', `${org}/${name}`, title)
+    if (dry) continue
+    const current = liveMap.get(title)
+    if (!current) continue
+    try {
+      await gh(['api', `repos/${org}/${name}/keys/${current.id}`, '--method', 'DELETE'])
+    } catch (err) {
+      if (!/Not Found/.test(err.message)) throw err
+    }
+  }
+
+  if (desired === undefined) return undefined
+  return Array.isArray(desired) ? applied : applied[0]
+}
+
+// github keeps the type and base64 of a key and drops the comment, so only
+// those two are compared or every apply would see drift
+function sameDeployKey(a, b) {
+  const aReadOnly = a.readOnly !== false
+  const bReadOnly = b.read_only !== undefined ? b.read_only : b.readOnly !== false
+  return aReadOnly === bReadOnly && keyMaterial(a.key) === keyMaterial(b.key)
+}
+
+function keyMaterial(key) {
+  return (key || '').trim().split(/\s+/).slice(0, 2).join(' ')
+}
+
+async function getDeployKeys(org, name) {
+  try {
+    return JSON.parse(await gh(['api', `repos/${org}/${name}/keys`, '--paginate']))
   } catch {
     return []
   }

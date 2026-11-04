@@ -775,6 +775,37 @@ Org teams are reconciled before repos. Parent teams should come before children 
 
 Only direct collaborators are managed. Org-level implicit access is ignored. Unlisted direct collaborators are removed.
 
+### Deploy keys
+
+```json
+{
+  "org": "my-org",
+  "repos": [
+    {
+      "name": "my-lib",
+      "deployKeys": [
+        { "title": "ci-deploy", "key": "ssh-ed25519 AAAA... ci@example" },
+        { "title": "release-bot", "key": "ssh-ed25519 AAAA...", "readOnly": false }
+      ]
+    }
+  ]
+}
+```
+
+Fields:
+
+- `title` — required. The identity of the key, like `username` on collaborators.
+- `key` — required. The full public key line. Only public material goes in config.
+- `readOnly` — optional, defaults to `true`. Set it to `false` for a key that may push.
+
+Behavior:
+
+GitHub only creates, lists and deletes deploy keys; a key's title, contents and read-only flag are fixed once made. So a key whose contents or `readOnly` changed is deleted and created again (`deploy-key ... replaced`). Missing keys are created (`deploy-key`), and a key octoops made that the config no longer declares is removed (`remove-deploy-key`). Keys octoops never recorded are left alone, like direct collaborators versus implicit access. GitHub drops the comment from a key and keeps the type and base64, so only those two are compared.
+
+GitHub allows a public key on one repository only. Adding one that is already attached elsewhere fails with an error naming the title; generate a key per repo. For a single key, pass one object instead of a list.
+
+`--dry-run` diffs config against state without reading the repo's keys, so it shows what's declared rather than what would change.
+
 ### Minimal repo with just teams and topics
 
 ```json
