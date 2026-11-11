@@ -4156,7 +4156,27 @@ async function npm(args, opts = {}) {
   throw new Error([res.stderr, res.stdout].filter(Boolean).join(' | ') || 'npm exited with code ' + res.code)
 }
 
-function run(cmd, args, opts = {}) {
+// view reads the public registry, everything else needs a session. checked
+// once, before the first npm command that needs one
+const NPM_ANONYMOUS = new Set(['view', 'whoami', 'login'])
+let npmLogin = null
+
+function ensureNpmLogin() {
+  if (!npmLogin) npmLogin = checkNpmLogin()
+  return npmLogin
+}
+
+async function checkNpmLogin() {
+  const res = await run('npm', ['whoami'], { allowFailure: true })
+  if (res.code === 0) return
+  if (!process.stdin.isTTY) throw new Error('not logged in to npm, run npm login first')
+  console.log('  not logged in to npm, logging in')
+  await run('npm', ['login'], { interactive: true })
+}
+
+async function run(cmd, args, opts = {}) {
+  if (cmd === 'npm' && !NPM_ANONYMOUS.has(args[0])) await ensureNpmLogin()
+
   const line = '> ' + cmd + ' ' + args.join(' ')
   console.log(line)
   audit(line)
