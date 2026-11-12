@@ -195,7 +195,13 @@ Top-level repo fields for basic settings:
 - `template` — overloaded by type:
   - `"owner/repo"` — create the repo *from* a template repo. Only used at create time. Mutually exclusive with `init` (templates already have content).
   - `true` / `false` — mark this repo *as* a template (so others can "Use this template"). Settable on existing repos via the settings PATCH.
-- `merging` — `{ squashOnly, deleteBranchOnMerge }`
+- `merging` — `{ squashOnly, deleteBranchOnMerge, squashMessage }`
+  - `squashOnly: true` allows only squash merging; `squashOnly: false` allows merge commits and rebase merging and turns squash merging **off**
+  - `squashMessage` — the default squash commit message. As in the UI, it's a sub-option of squash merging: setting it turns squash merging on (other merge methods are left as they are), and combining it with `squashOnly: false` is an error. The values match the four choices under "Allow squash merging" in Settings → General → Pull Requests:
+    - `"default"` — Default message (commit title for a single commit, PR title otherwise; commit messages as the body)
+    - `"pr-title"` — Default to pull request title
+    - `"pr-title-commits"` — Default to pull request title and commit details
+    - `"pr-title-description"` — Default to pull request title and description
 - `pages` — GitHub Pages site: `{ build: "workflow" | "branch", branch, path, private }`. `build: "workflow"` (the default) deploys from Actions (`actions/deploy-pages`); `build: "branch"` serves `branch` at `path` (default `/`). `private: true` limits the site to people with read access to the repo; it needs `enterprise: true` and is skipped with `skip-pages-private` otherwise. `pages: false` removes the site. The site is created if missing and updated in the same apply, so a `private: true` site is never public with content on it (a new site has nothing deployed until a workflow or branch push does). Omitting `pages` leaves the site untouched
 
 Omitting a field leaves the current GitHub value untouched. Setting it makes octoops reconcile it.
