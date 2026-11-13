@@ -154,12 +154,8 @@ async function importRepo(org, name) {
   if (repo.visibility === 'internal') entry.internal = true
   else entry.private = repo.private
 
-  const merging = {}
-  if (!repo.allow_merge_commit && !repo.allow_rebase_merge && repo.allow_squash_merge) {
-    merging.squashOnly = true
-  }
-  if (repo.delete_branch_on_merge) merging.deleteBranchOnMerge = true
-  if (Object.keys(merging).length) entry.merging = merging
+  const merging = repoMergingConfig(repo)
+  if (merging) entry.merging = merging
 
   if (repo.has_wiki === false) entry.wiki = false
   if (repo.has_projects === false) entry.projects = false
@@ -1044,6 +1040,8 @@ const DEFAULTS_KEYS = new Set([...REPO_KEYS, 'extends'].filter((k) => k !== 'ren
 
 const REPO_ALIASES = { extends: 'defaults', inherits: 'defaults', delete: 'deleted' }
 
+const MERGING_KEYS = new Set(['squashOnly', 'deleteBranchOnMerge', 'squashMessage'])
+
 function validateConfig(config) {
   for (const k of Object.keys(config)) {
     if (!ROOT_KEYS.has(k)) console.error('warning: unknown property "' + k + '" at config root' + suggest(k, ROOT_KEYS, null))
@@ -1052,6 +1050,7 @@ function validateConfig(config) {
     for (const k of Object.keys(raw)) {
       if (!REPO_KEYS.has(k)) console.error('warning: unknown property "' + k + '" on repo "' + (raw.name || '?') + '"' + suggest(k, REPO_KEYS, REPO_ALIASES))
     }
+    validateMerging(raw.merging, 'repo "' + (raw.name || '?') + '"')
     if (raw.renamedFrom !== undefined && raw.renamedFrom === raw.name) {
       console.error('warning: "renamedFrom" on repo "' + raw.name + '" equals its name and is ignored')
     }
@@ -1082,6 +1081,23 @@ function validateConfig(config) {
       }
       if (!DEFAULTS_KEYS.has(k)) console.error('warning: unknown property "' + k + '" on defaults "' + name + '"' + suggest(k, DEFAULTS_KEYS, null))
     }
+    validateMerging(entry && entry.merging, 'defaults "' + name + '"')
+  }
+}
+
+// "$ref"s are already resolved here. A legacy bare preset name ("merging": "name")
+// is still a string and resolves later, so it goes unchecked
+function validateMerging(merging, where) {
+  if (!merging || typeof merging !== 'object') return
+  for (const k of Object.keys(merging)) {
+    if (MERGING_KEYS.has(k)) continue
+    console.error(
+      'warning: unknown property "' +
+        k +
+        '" in merging on ' +
+        where +
+        suggest(k, MERGING_KEYS, null)
+    )
   }
 }
 
@@ -1461,6 +1477,79 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   }
 }
 
+// The four "Allow squash merging" choices in Settings → General → Pull Requests,
+// each a fixed pair of the API's squash_merge_commit_title / _message
+const SQUASH_MESSAGES = {
+  default: { title: 'COMMIT_OR_PR_TITLE', message: 'COMMIT_MESSAGES' },
+  'pr-title': { title: 'PR_TITLE', message: 'BLANK' },
+  'pr-title-commits': { title: 'PR_TITLE', message: 'COMMIT_MESSAGES' },
+  'pr-title-description': { title: 'PR_TITLE', message: 'PR_BODY' }
+}
+
+// Config merging → repo PATCH fields
+function repoMergingBody(merging, where) {
+  const body = {}
+  if (merging.squashOnly !== undefined) {
+    body.allow_squash_merge = !!merging.squashOnly
+    body.allow_merge_commit = !merging.squashOnly
+    body.allow_rebase_merge = !merging.squashOnly
+  }
+  if (merging.deleteBranchOnMerge !== undefined) {
+    body.delete_branch_on_merge = merging.deleteBranchOnMerge
+  }
+  if (merging.squashMessage !== undefined) {
+    const s = Object.hasOwn(SQUASH_MESSAGES, merging.squashMessage)
+      ? SQUASH_MESSAGES[merging.squashMessage]
+      : null
+    if (!s) {
+      throw new Error(
+        'invalid merging.squashMessage "' +
+          merging.squashMessage +
+          '" for ' +
+          where +
+          ' (expected ' +
+          Object.keys(SQUASH_MESSAGES).join('|') +
+          ')'
+      )
+    }
+    // squashOnly: false disables squash merging, which leaves no squash message to set
+    if (merging.squashOnly === false) {
+      throw new Error(
+        'merging.squashMessage needs squash merging, but merging.squashOnly: false ' +
+          'disables it for ' +
+          where
+      )
+    }
+    // Like the UI, where the message is a sub-option of "Allow squash merging":
+    // setting it allows squash merging and leaves the other merge methods as they are
+    body.allow_squash_merge = true
+    body.squash_merge_commit_title = s.title
+    body.squash_merge_commit_message = s.message
+  }
+  return body
+}
+
+// Repo API fields → config merging, or null when there is nothing to record
+function repoMergingConfig(repo) {
+  const merging = {}
+  if (!repo.allow_merge_commit && !repo.allow_rebase_merge && repo.allow_squash_merge) {
+    merging.squashOnly = true
+  }
+  if (repo.delete_branch_on_merge) merging.deleteBranchOnMerge = true
+  // only recorded while squash merging is allowed (applying it allows squash merging),
+  // and not for the default
+  if (repo.allow_squash_merge) {
+    const squashMessage = Object.keys(SQUASH_MESSAGES).find((k) => {
+      const s = SQUASH_MESSAGES[k]
+      return (
+        s.title === repo.squash_merge_commit_title && s.message === repo.squash_merge_commit_message
+      )
+    })
+    if (squashMessage && squashMessage !== 'default') merging.squashMessage = squashMessage
+  }
+  return Object.keys(merging).length ? merging : null
+}
+
 async function reconcileSettings(org, repo, dry, prev = {}) {
   const patch = {}
 
@@ -1474,17 +1563,7 @@ async function reconcileSettings(org, repo, dry, prev = {}) {
   if (repo.issues !== undefined) patch.has_issues = repo.issues
   if (repo.discussions !== undefined) patch.has_discussions = repo.discussions
   if (typeof repo.template === 'boolean') patch.is_template = repo.template
-  if (repo.merging) {
-    const m = repo.merging
-    if (m.squashOnly !== undefined) {
-      patch.allow_squash_merge = !!m.squashOnly
-      patch.allow_merge_commit = !m.squashOnly
-      patch.allow_rebase_merge = !m.squashOnly
-    }
-    if (m.deleteBranchOnMerge !== undefined) {
-      patch.delete_branch_on_merge = m.deleteBranchOnMerge
-    }
-  }
+  if (repo.merging) Object.assign(patch, repoMergingBody(repo.merging, org + '/' + repo.name))
 
   if (repo.security) {
     const sa = {}
