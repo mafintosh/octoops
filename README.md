@@ -38,6 +38,15 @@ Resync state from live GitHub (use this if your state file got out of sync):
 octoops resync config.json
 ```
 
+Check a config for mistakes without touching GitHub:
+
+```bash
+octoops lint config.json
+octoops lint org-manifest.json
+```
+
+It runs every check `apply` does before its first API call (unknown properties, unknown presets and defaults, malformed secrets, team members missing from `admins`/`members`, an app declared in two places) and exits non-zero on an error. Given a manifest it lints each included file and also catches an app that sits in the root `apps` list of one file and on a repo entry in another.
+
 Apply a manifest that orchestrates multiple configs in one shot:
 
 ```json
@@ -427,6 +436,33 @@ Then run apply with `GH_TOKEN` set for that invocation so your regular `gh auth`
 ```bash
 GH_TOKEN=ghp_yourpathere octoops apply your-config.json
 ```
+
+#### Apps on the repo entry
+
+Instead of listing repos under the app, a repo can name the apps it wants. This is the form that works in a `defaults` pack, and it follows the repo through renames:
+
+```json
+{
+  "org": "my-org",
+  "defaults": {
+    "service": { "apps": ["my-ci-bot"] }
+  },
+  "repos": [
+    { "name": "api", "defaults": "service" },
+    { "name": "web", "apps": ["my-ci-bot", "dependabot"] }
+  ]
+}
+```
+
+- Entries are app slugs, or `{ "name": "..." }`. Display names are matched the same way as on the root list.
+- Missing apps are given the repo (`add-app`), and an app octoops gave the repo that the entry no longer lists is taken off it (`remove-app`). `apps: []` takes back everything octoops gave. Access granted in the UI was never recorded and is left alone.
+- An app installed with access to all repositories already covers the repo, so nothing is called and it is reported as `skip-app`. Taking such an app off a repo is also a `skip-app`, that scope is UI-only.
+- Errors if the app isn't installed on the org.
+- An app goes in the root `apps` list or on repo entries, never both. The same app in both places is an error, `octoops lint` on a manifest catches it across files too.
+- Which apps a repo was given lives only in the state file, GitHub won't list it for a token. `resync` keeps it, deleting the state file forgets it.
+- `--dry-run` diffs config against state and reads the org's installations, it does not write.
+
+The token requirements above apply to both forms. With the repo form the calls happen while each repo is reconciled, so an apply with the wrong token stops at the first repo whose `apps` changed.
 
 ### Runners
 

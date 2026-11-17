@@ -66,11 +66,12 @@ reconciles actual state with desired state using `gh api` calls.
 3. Patch description / visibility if changed
 4. Set topics
 5. For each team: add/update permission if wrong, remove if not in desired list
-6. Apply branch protection rules
-7. Set up environments with team reviewers
-8. Apply rulesets (create or update by name)
-9. Set up npm trusted publishing (OIDC) if `npm` config present
-10. Set up crates.io trusted publishing (OIDC) if `crates` config present, publishing a placeholder 0.0.0 first for a crate that doesn't exist
+6. For each app in `apps`: add the repo to the app's org installation, remove it from apps an earlier apply added and the entry no longer lists
+7. Apply branch protection rules
+8. Set up environments with team reviewers
+9. Apply rulesets (create or update by name)
+10. Set up npm trusted publishing (OIDC) if `npm` config present
+11. Set up crates.io trusted publishing (OIDC) if `crates` config present, publishing a placeholder 0.0.0 first for a crate that doesn't exist
 
 ## Behavior
 

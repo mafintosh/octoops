@@ -11,7 +11,7 @@ const PERMISSIONS = {
   admin: 'admin'
 }
 
-module.exports = { apply, importOrg, seed, filter, resync, loadConfig, renameRepo, expandIncludes, listNpmTrust }
+module.exports = { apply, importOrg, seed, filter, resync, lint, loadConfig, renameRepo, expandIncludes, listNpmTrust }
 
 const MERGE_QUEUE_METHODS = new Set(['MERGE', 'SQUASH', 'REBASE'])
 const MERGE_QUEUE_GROUPINGS = new Set(['ALLGREEN', 'HEADGREEN'])
@@ -474,6 +474,8 @@ function seed(config, opts = {}) {
     if (repo.teams) entry.teams = repo.teams
     if (repo.collaborators) entry.collaborators = repo.collaborators
     if (repo.deployKeys) entry.deployKeys = repo.deployKeys
+    if (repo.apps) entry.apps = repo.apps
+    else if (opts.keepApps && existing.apps) entry.apps = existing.apps
     if (repo.branchProtection) entry.branchProtection = repo.branchProtection
     if (repo.environments) entry.environments = repo.environments
     if (repo.rulesets) entry.rulesets = repo.rulesets
@@ -568,7 +570,7 @@ async function resync(config, opts = {}) {
 
   // tombstones for repos still marked deleted survive the resync, GitHub has
   // nothing to import for them and losing one means one more DELETE/404 round.
-  // the npm publisher clock lives only in state, nothing on GitHub can rebuild it
+  // the npm publisher clock lives only in state, nothing on GitHub can rebuild it.
   const kept = {}
   if (opts.statePath) {
     const old = loadState(opts.statePath)
@@ -576,18 +578,25 @@ async function resync(config, opts = {}) {
       const key = config.org + '/' + r.name
       const was = old[key] || {}
       if (r.deleted === true && was.deleted === true) kept[key] = was
-      else if (was.npmTrust) kept[key] = { npmTrust: was.npmTrust }
+      else {
+        // which apps an apply gave a repo lives only in state too, the
+        // installation's repo list cannot be read back with a token
+        const keep = {}
+        if (was.npmTrust) keep.npmTrust = was.npmTrust
+        if (was.apps) keep.apps = was.apps
+        if (Object.keys(keep).length) kept[key] = keep
+      }
     }
     saveState(opts.statePath, kept)
   }
-  seed(fresh, opts)
+  seed(fresh, { ...opts, keepApps: true })
 }
 
 async function apply(config, opts = {}) {
   const dry = opts.dry === true
   if (config.enterprise) opts = { ...opts, enterprise: true }
   // values are prompted once per name per apply and reused across every target
-  opts = { ...opts, secretValues: new Map(), invalidate: new Set(opts.invalidate || []), invalidated: new Set() }
+  opts = { ...opts, secretValues: new Map(), invalidate: new Set(opts.invalidate || []), invalidated: new Set(), installations: new Map() }
   validateConfig(config)
   const state = loadState(opts.statePath)
 
@@ -602,27 +611,6 @@ async function apply(config, opts = {}) {
   }
 
   const presets = config.presets || {}
-
-  if ((config.admins || config.members) && config.teams) {
-    const allowed = new Set([
-      ...(config.admins || []).map((u) => u.toLowerCase()),
-      ...(config.members || []).map((u) => u.toLowerCase())
-    ])
-    const missing = []
-    for (const team of config.teams) {
-      for (const m of team.members || []) {
-        if (!allowed.has(m.username.toLowerCase())) {
-          missing.push(`${m.username} (team "${team.name}")`)
-        }
-      }
-    }
-    if (missing.length) {
-      throw new Error(
-        'team members not declared in admins/members:\n  - ' + missing.join('\n  - ') +
-        '\nadd them to admins/members (extend a shared file if the canonical list lives elsewhere)'
-      )
-    }
-  }
 
   try {
     const adminsChanged = (config.admins || state.admins) && changed(config.admins, state.admins)
@@ -1032,7 +1020,7 @@ const REPO_KEYS = new Set([
   'private', 'internal',
   'defaultBranch', 'wiki', 'projects', 'issues', 'discussions', 'archived', 'deleted', 'init', 'template',
   'merging', 'topics',
-  'teams', 'collaborators', 'deployKeys',
+  'teams', 'collaborators', 'deployKeys', 'apps',
   'branchProtection', 'environments', 'rulesets',
   'npm', 'pypi', 'crates', 'nuget', 'pubDev', 'secrets', 'security',
   'actionsAccess', 'forkPrContributorApproval', 'githubPackages', 'pages',
@@ -1044,18 +1032,52 @@ const DEFAULTS_KEYS = new Set([...REPO_KEYS, 'extends'].filter((k) => k !== 'ren
 
 const REPO_ALIASES = { extends: 'defaults', inherits: 'defaults', delete: 'deleted' }
 
-function validateConfig(config) {
+function warnStderr(msg) {
+  console.error('warning: ' + msg)
+}
+
+function validateConfig(config, warn = warnStderr) {
+  if ((config.admins || config.members) && config.teams) {
+    const allowed = new Set([
+      ...(config.admins || []).map((u) => u.toLowerCase()),
+      ...(config.members || []).map((u) => u.toLowerCase())
+    ])
+    const missing = []
+    for (const team of config.teams) {
+      for (const m of team.members || []) {
+        if (!allowed.has(m.username.toLowerCase())) {
+          missing.push(`${m.username} (team "${team.name}")`)
+        }
+      }
+    }
+    if (missing.length) {
+      throw new Error(
+        'team members not declared in admins/members:\n  - ' + missing.join('\n  - ') +
+        '\nadd them to admins/members (extend a shared file if the canonical list lives elsewhere)'
+      )
+    }
+  }
+
+  const rootApps = new Set((config.apps || []).filter((a) => a && a.name).map((a) => slugify(a.name)))
+
   for (const k of Object.keys(config)) {
-    if (!ROOT_KEYS.has(k)) console.error('warning: unknown property "' + k + '" at config root' + suggest(k, ROOT_KEYS, null))
+    if (!ROOT_KEYS.has(k)) warn('unknown property "' + k + '" at config root' + suggest(k, ROOT_KEYS, null))
   }
   for (const raw of config.repos || []) {
     for (const k of Object.keys(raw)) {
-      if (!REPO_KEYS.has(k)) console.error('warning: unknown property "' + k + '" on repo "' + (raw.name || '?') + '"' + suggest(k, REPO_KEYS, REPO_ALIASES))
+      if (!REPO_KEYS.has(k)) warn('unknown property "' + k + '" on repo "' + (raw.name || '?') + '"' + suggest(k, REPO_KEYS, REPO_ALIASES))
     }
     if (raw.renamedFrom !== undefined && raw.renamedFrom === raw.name) {
-      console.error('warning: "renamedFrom" on repo "' + raw.name + '" equals its name and is ignored')
+      warn('"renamedFrom" on repo "' + raw.name + '" equals its name and is ignored')
     }
     validateSecretNames(raw.secrets, 'repo "' + (raw.name || '?') + '"')
+    if (raw.deleted !== true) {
+      // apps can arrive through a defaults pack, so check the merged entry
+      const where = 'repo "' + (raw.name || '?') + '"'
+      for (const slug of normalizeRepoApps(resolveDefaults(raw, config.defaults).apps, where)) {
+        if (rootApps.has(slug)) throw new Error('app "' + slug + '" is declared both in the root "apps" list and on ' + where + ', pick one place or they undo each other')
+      }
+    }
     for (const env of raw.environments || []) {
       const where = 'environment "' + env.name + '" on repo "' + (raw.name || '?') + '"'
       validateSecretNames(env.secrets, where)
@@ -1071,18 +1093,62 @@ function validateConfig(config) {
     if (!s || typeof s !== 'object') throw new Error('orgSecrets "' + name + '" must be an object like { "visibility": "selected", "repos": [...] }')
     if (s.visibility !== undefined && !SECRET_VISIBILITY.has(s.visibility)) throw new Error('orgSecrets "' + name + '" visibility must be one of all, private, selected')
     if (s.visibility === 'selected' && !(Array.isArray(s.repos) && s.repos.length)) throw new Error('orgSecrets "' + name + '" with visibility "selected" needs a non-empty "repos" list')
-    if (s.visibility !== 'selected' && s.repos) console.error('warning: orgSecrets "' + name + '" lists repos but visibility is not "selected", ignored')
+    if (s.visibility !== 'selected' && s.repos) warn('orgSecrets "' + name + '" lists repos but visibility is not "selected", ignored')
   }
   for (const name of Object.keys(config.defaults || {})) {
     const entry = config.defaults[name]
     for (const k of Object.keys(entry || {})) {
       if (k === 'deleted') {
-        console.error('warning: "deleted" on defaults "' + name + '" is ignored — set it on the repo entry')
+        warn('"deleted" on defaults "' + name + '" is ignored — set it on the repo entry')
         continue
       }
-      if (!DEFAULTS_KEYS.has(k)) console.error('warning: unknown property "' + k + '" on defaults "' + name + '"' + suggest(k, DEFAULTS_KEYS, null))
+      if (!DEFAULTS_KEYS.has(k)) warn('unknown property "' + k + '" on defaults "' + name + '"' + suggest(k, DEFAULTS_KEYS, null))
     }
   }
+}
+
+// everything that can be said about a config without asking GitHub. takes a
+// config or a manifest, a manifest also gets the checks that span its files
+function lint(configPath) {
+  const problems = []
+  const loaded = []
+
+  for (const file of expandIncludes(configPath)) {
+    try {
+      const config = loadConfig(file)
+      validateConfig(config, (message) => problems.push({ file, level: 'warning', message }))
+      // unknown defaults and old-style preset names only surface on resolve
+      for (const raw of config.repos || []) {
+        if (raw.deleted !== true) resolve(resolveDefaults(raw, config.defaults), config.presets || {})
+      }
+      loaded.push({ file, config })
+    } catch (err) {
+      problems.push({ file, level: 'error', message: err.message })
+    }
+  }
+
+  // an installation's repo list is one org-wide thing, a root "apps" entry in
+  // one file and the same app on a repo entry in another would fight over it
+  const rootApps = new Map()
+  for (const { file, config } of loaded) {
+    for (const a of config.apps || []) {
+      if (a && a.name) rootApps.set(config.org + '/' + slugify(a.name), file)
+    }
+  }
+  for (const { file, config } of loaded) {
+    const seen = new Set()
+    for (const raw of config.repos || []) {
+      if (raw.deleted === true) continue
+      for (const slug of normalizeRepoApps(resolveDefaults(raw, config.defaults).apps, 'repo "' + raw.name + '"')) {
+        const other = rootApps.get(config.org + '/' + slug)
+        if (!other || other === file || seen.has(slug)) continue
+        seen.add(slug)
+        problems.push({ file, level: 'error', message: 'app "' + slug + '" is on repo entries here and in the root "apps" list of ' + path.relative(process.cwd(), other) + ', pick one place' })
+      }
+    }
+  }
+
+  return problems
 }
 
 function validateSecretNames(secrets, where) {
@@ -1239,6 +1305,7 @@ function repoChanged(repo, prev, opts) {
   if ((repo.teams || prev.teams) && changed(repo.teams, prev.teams)) return true
   if ((repo.collaborators || prev.collaborators) && changed(repo.collaborators, prev.collaborators)) return true
   if ((repo.deployKeys || prev.deployKeys) && changed(repo.deployKeys, prev.deployKeys)) return true
+  if ((repo.apps || prev.apps) && changed(repo.apps, prev.apps)) return true
   if (changed(repo.branchProtection, prev.branchProtection)) return true
   if (changed(repo.environments, prev.environments)) return true
   if ((repo.rulesets || prev.rulesets) && changed(repo.rulesets, prev.rulesets)) return true
@@ -1360,6 +1427,11 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   } else {
     done.deployKeys = repo.deployKeys
   }
+
+  if ((repo.apps || prev.apps) && changed(repo.apps, prev.apps)) {
+    await reconcileRepoApps(org, repo.name, repo.apps, prev.apps, dry, opts)
+  }
+  done.apps = repo.apps
 
   if (changed(repo.branchProtection, prev.branchProtection)) {
     for (const rule of repo.branchProtection || []) {
@@ -2043,6 +2115,96 @@ async function reconcileApps(org, desired, prev, dry) {
       }
     }
   }
+}
+
+// an entry is an app slug, or { name } to leave room for more fields. a
+// display name works too, like on the root apps list
+function normalizeRepoApps(apps, where) {
+  if (apps === undefined || apps === null) return []
+  if (!Array.isArray(apps)) throw new Error('apps on ' + where + ' must be a list of app slugs')
+  const slugs = new Set()
+  for (const a of apps) {
+    const name = typeof a === 'string' ? a : a && a.name
+    if (typeof name !== 'string' || !name) throw new Error('apps on ' + where + ' must be a list of app slugs')
+    slugs.add(slugify(name))
+  }
+  return [...slugs].sort()
+}
+
+// one list per org, fetched the first time a repo needs it in this apply
+async function orgInstallations(org, opts) {
+  if (!opts.installations) opts.installations = new Map()
+  if (!opts.installations.has(org)) {
+    const pages = JSON.parse(await gh(['api', `orgs/${org}/installations`, '--paginate', '--slurp']))
+    opts.installations.set(org, new Map(pages.flatMap((p) => p.installations).map((i) => [i.app_slug, i])))
+  }
+  return opts.installations.get(org)
+}
+
+// the apps side of a repo entry: put this repo on, or take it off, the
+// selected-repos list of an org installation. state-only like the root apps
+// list, so an app someone gave the repo in the UI is never taken away
+async function reconcileRepoApps(org, name, desired, prev, dry, opts) {
+  const target = `${org}/${name}`
+  const want = normalizeRepoApps(desired, target)
+  const had = normalizeRepoApps(prev, target)
+  const added = want.filter((slug) => !had.includes(slug))
+  const removed = had.filter((slug) => !want.includes(slug))
+  if (!added.length && !removed.length) return
+
+  const installs = await orgInstallations(org, opts)
+  for (const slug of added) {
+    if (!installs.has(slug)) throw new Error('app "' + slug + '" on ' + target + ' is not installed on ' + org + ' — install it via the UI first')
+  }
+
+  let repoId = null
+  const id = async () => repoId || (repoId = JSON.parse(await gh(['api', `repos/${org}/${name}`])).id)
+
+  for (const slug of added) {
+    const install = installs.get(slug)
+    // nothing to add, and the declaration holds if the scope is narrowed later
+    if (install.repository_selection === 'all') {
+      print(dry, 'skip-app', target, slug + ' already has all-repos access')
+      continue
+    }
+    print(dry, 'add-app', target, slug)
+    if (dry) continue
+    try {
+      await gh(['api', `user/installations/${install.id}/repositories/${await id()}`, '--method', 'PUT'])
+    } catch (err) {
+      throw appAccessError(err, slug, target)
+    }
+  }
+
+  for (const slug of removed) {
+    const install = installs.get(slug)
+    if (!install) {
+      print(dry, 'skip-app', target, slug + ' is no longer installed')
+      continue
+    }
+    if (install.repository_selection === 'all') {
+      print(dry, 'skip-app', target, slug + ' has all-repos access, that can only be changed in the UI')
+      continue
+    }
+    print(dry, 'remove-app', target, slug)
+    if (dry) continue
+    try {
+      await gh(['api', `user/installations/${install.id}/repositories/${await id()}`, '--method', 'DELETE'])
+    } catch (err) {
+      if (/Not Found/.test(err.message)) continue
+      throw appAccessError(err, slug, target)
+    }
+  }
+}
+
+// the default gh token cannot touch another app's installation, and github
+// answers that with a bare 403 or 404
+function appAccessError(err, slug, target) {
+  if (!/Not Found|Forbidden|403|not accessible/i.test(err.message)) return err
+  return new Error(
+    'could not change access of app "' + slug + '" to ' + target + ': ' + err.message.trim() +
+    '\nthis needs a classic personal access token from the org owner who installed the app, passed as GH_TOKEN. see "GitHub Apps installation scope" in the README'
+  )
 }
 
 async function pruneOfflineRunners(org, dry) {

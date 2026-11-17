@@ -2,7 +2,7 @@
 
 const { command, summary, flag, arg } = require('paparam')
 const path = require('path')
-const { apply, importOrg, seed, filter, resync, loadConfig, renameRepo, expandIncludes, listNpmTrust } = require('.')
+const { apply, importOrg, seed, filter, resync, lint, loadConfig, renameRepo, expandIncludes, listNpmTrust } = require('.')
 
 const applyCmd = command(
   'apply',
@@ -85,6 +85,20 @@ const resyncCmd = command(
     const statePath = configPath.replace(/\.json$/, '.state.json')
     await resync(config, { statePath })
     console.log('resynced state to ' + statePath)
+  }
+)
+
+const lintCmd = command(
+  'lint',
+  summary('Check a config for mistakes without touching GitHub'),
+  arg('<config>', 'Path to config JSON file or manifest with "includes"'),
+  function () {
+    const problems = lint(path.resolve(lintCmd.args.config))
+    for (const p of problems) console.error(path.relative(process.cwd(), p.file) + ': ' + p.level + ': ' + p.message)
+    const errors = problems.filter((p) => p.level === 'error').length
+    const warnings = problems.length - errors
+    if (errors) process.exitCode = 1
+    console.log(problems.length ? errors + (errors === 1 ? ' error, ' : ' errors, ') + warnings + (warnings === 1 ? ' warning' : ' warnings') : 'ok')
   }
 )
 
@@ -179,6 +193,7 @@ const cmd = command(
   importCmd,
   seedCmd,
   resyncCmd,
+  lintCmd,
   listCmd,
   filterCmd,
   renameCmd,
