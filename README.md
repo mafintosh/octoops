@@ -47,6 +47,16 @@ octoops lint org-manifest.json
 
 It runs every check `apply` does before its first API call (unknown properties, unknown presets and defaults, malformed secrets, team members missing from `admins`/`members`, an app declared in two places) and exits non-zero on an error. Given a manifest it lints each included file and also catches an app that sits in the root `apps` list of one file and on a repo entry in another.
 
+Print a repo entry the way `apply` sees it, with `extends`, `defaults` and presets all resolved:
+
+```bash
+octoops preview config.json --repo my-repo
+octoops preview org-manifest.json --repo my-org/my-repo
+octoops preview config.json
+```
+
+The output is JSON on stdout, one object for a single match and a list otherwise. The file each entry came from is printed on stderr. It reads only the config, not GitHub or the state file, so it shows what is declared, not what would change (that is `apply --dry-run`). Org-level settings that reach a repo from outside its entry, the root `apps` list and `orgSecrets`, are not folded in.
+
 Apply a manifest that orchestrates multiple configs in one shot:
 
 ```json

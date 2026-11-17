@@ -2,7 +2,7 @@
 
 const { command, summary, flag, arg } = require('paparam')
 const path = require('path')
-const { apply, importOrg, seed, filter, resync, lint, loadConfig, renameRepo, expandIncludes, listNpmTrust } = require('.')
+const { apply, importOrg, seed, filter, resync, lint, preview, loadConfig, renameRepo, expandIncludes, listNpmTrust } = require('.')
 
 const applyCmd = command(
   'apply',
@@ -102,6 +102,26 @@ const lintCmd = command(
   }
 )
 
+const previewCmd = command(
+  'preview',
+  summary('Print repo entries as apply sees them, with defaults and presets resolved'),
+  arg('<config>', 'Path to config JSON file or manifest with "includes"'),
+  flag('--repo [name]', 'Only this repo, as "repo" or "org/repo"'),
+  function () {
+    const name = previewCmd.flags.repo
+    const found = preview(path.resolve(previewCmd.args.config), name)
+    if (name && !found.length) {
+      console.error('no repo "' + name + '" in ' + previewCmd.args.config)
+      process.exitCode = 1
+      return
+    }
+    // where each entry came from goes to stderr so stdout stays plain JSON
+    for (const f of found) console.error(f.org + '/' + f.repo.name + ' from ' + path.relative(process.cwd(), f.file))
+    const repos = found.map((f) => f.repo)
+    console.log(JSON.stringify(name && repos.length === 1 ? repos[0] : repos, null, 2))
+  }
+)
+
 const listCmd = command(
   'list',
   summary('List repository names from a config file'),
@@ -194,6 +214,7 @@ const cmd = command(
   seedCmd,
   resyncCmd,
   lintCmd,
+  previewCmd,
   listCmd,
   filterCmd,
   renameCmd,
