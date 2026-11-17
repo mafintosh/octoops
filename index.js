@@ -11,7 +11,7 @@ const PERMISSIONS = {
   admin: 'admin'
 }
 
-module.exports = { apply, importOrg, seed, filter, resync, lint, loadConfig, renameRepo, expandIncludes, listNpmTrust }
+module.exports = { apply, importOrg, seed, filter, resync, lint, preview, loadConfig, renameRepo, expandIncludes, listNpmTrust }
 
 const MERGE_QUEUE_METHODS = new Set(['MERGE', 'SQUASH', 'REBASE'])
 const MERGE_QUEUE_GROUPINGS = new Set(['ALLGREEN', 'HEADGREEN'])
@@ -1149,6 +1149,29 @@ function lint(configPath) {
   }
 
   return problems
+}
+
+// the repo entries exactly as apply sees them, with extends, defaults and
+// presets all folded in. name is "repo" or "org/repo", without one every
+// repo is returned. takes a config or a manifest
+function preview(configPath, name) {
+  const slash = name ? name.indexOf('/') : -1
+  const org = slash === -1 ? null : name.slice(0, slash)
+  const repoName = name ? name.slice(slash + 1) : null
+  const out = []
+
+  for (const file of expandIncludes(configPath)) {
+    const config = loadConfig(file)
+    if (org && (config.org || '').toLowerCase() !== org.toLowerCase()) continue
+    for (const raw of config.repos || []) {
+      if (repoName && (raw.name || '').toLowerCase() !== repoName.toLowerCase()) continue
+      const repo = raw.deleted === true ? raw : resolve(resolveDefaults(raw, config.defaults), config.presets || {})
+      // name first, the defaults merge leaves it wherever it fell
+      out.push({ file, org: config.org, repo: { name: repo.name, ...repo } })
+    }
+  }
+
+  return out
 }
 
 function validateSecretNames(secrets, where) {
