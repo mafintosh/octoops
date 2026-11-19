@@ -45,7 +45,7 @@ octoops lint config.json
 octoops lint org-manifest.json
 ```
 
-It runs every check `apply` does before its first API call (unknown properties, unknown presets and defaults, malformed secrets, team members missing from `admins`/`members`, an app declared in two places, malformed `npmOrgs` and npm package access) and exits non-zero on an error. Given a manifest it lints each included file and also catches an app that sits in the root `apps` list of one file and on a repo entry in another, an npm team or npm roster declared in two files, and a package granted to an npm team no file declares.
+It runs every check `apply` does before its first API call (unknown properties, unknown presets and defaults, malformed secrets, team members missing from `admins`/`members`, an app declared in two places, malformed `npmOrgs` and npm package access) and exits non-zero on an error. Given a manifest it lints each included file and also catches an app that sits in the root `apps` list of one file and on a repo entry in another, an npm team or npm roster declared in two files, a package granted to an npm team no file declares or mirrors, and a mirrored team whose child sits in another file. Two more are errors to lint, though an apply goes ahead: a member of a mirrored team with no `npmUsers` entry, and a private repo that publishes a public package.
 
 Print a repo entry the way `apply` sees it, with `extends`, `defaults` and presets all resolved:
 
@@ -1057,6 +1057,61 @@ A private package is for the teams it names. npm's built-in `developers` team, w
 Each of the three keys is diffed against state on its own. Changing one runs one npm command for that package and leaves its publishers, maintainers and deprecation alone. Taking `access` or `mfa` out of the config leaves the registry as it is.
 
 A private package cannot be read anonymously, so whether its trusted publisher has published is read through `npm view`, which only shows the latest version.
+
+#### Mirroring GitHub teams
+
+Each mirrored GitHub team has an npm team of the same name, holding its members and its child teams' members. Whatever the GitHub team's permission on a repo, the npm team can install the repo's private package and cannot publish it. Packages publish through trusted publishing, or by a team granted `read-write` explicitly.
+
+Name the teams to mirror, in the file that declares them:
+
+```json
+{
+  "org": "my-org",
+  "npmUsers": { "Alice": "alice", "bob": "bob-on-npm" },
+  "teams": [
+    { "name": "sdk", "members": [{ "username": "bob", "role": "member" }] },
+    { "name": "sdk-write", "parent": "sdk", "members": [{ "username": "Alice", "role": "member" }] }
+  ],
+  "npmOrgs": {
+    "my-scope": { "mirror": ["sdk", "sdk-write"] }
+  }
+}
+```
+
+and ask for the repo's teams on the package:
+
+```json
+{
+  "name": "foo",
+  "private": true,
+  "teams": [
+    { "name": "sdk", "permission": "read" },
+    { "name": "sdk-write", "permission": "write" }
+  ],
+  "npm": { "package": "@my-scope/foo", "access": "private", "mirrorTeams": true }
+}
+```
+
+That is the same as writing npm teams `sdk` (bob-on-npm, alice) and `sdk-write` (alice), and granting both `read-only` on `@my-scope/foo`. `octoops preview` shows the grants. `teams` on the package still works next to `mirrorTeams`, and wins for a team named in both.
+
+`npmUsers` maps GitHub logins to npm usernames. Put it in one file and `extends` it from the others.
+
+Rules:
+
+- A mirrored team, its parents and its children are declared in one file.
+- Every team a repo grants is mirrored into its package's scope.
+- A login with no `npmUsers` entry gets no access, and is an error to `octoops lint`. Map it to `false` for someone who is meant to have none.
+- A mirrored member gets a `developer` seat in the npm org. Leaving the team takes them off the npm team, the seat stays.
+- npm's built-in `developers` team holds every org member and reads no private package.
+
+Not mirrored:
+
+- Collaborators cannot install. Put them on a team.
+- GitHub org owners cannot install without an npm role or team.
+- CI and bots cannot install without a read token.
+- Every org member can read a new private package until its first apply finishes.
+
+A private repo whose package has no `access` publishes its code to everyone. `octoops lint` reports that as an error until the package says `"access": "private"` or `"access": "public"`.
 
 ### PyPI trusted publishing (OIDC)
 

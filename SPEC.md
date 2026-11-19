@@ -121,6 +121,25 @@ On the repo `npm` block:
 - The three keys are diffed one by one. The rest of the block stays one unit
 - Access is set before publishers and maintainers, straight after the placeholder publish
 
+## Mirroring GitHub teams to npm
+
+Two directives are rewritten into the explicit shape above when a config is loaded, so apply,
+lint, seed and preview only see npm teams and grants spelled out.
+
+- `npmOrgs.<org>.mirror` lists GitHub teams of the same file. Each becomes an npm team named
+  after it, holding its members and those of every team below it, translated through
+  `npmUsers`
+- `npm.mirrorTeams: true` grants `read-only` to the npm team of every team in the repo's
+  `teams`, whatever its GitHub permission. `read-write` is never derived
+- `npmUsers` maps GitHub logins (matched without case) to npm usernames. A login without an
+  entry is left off the team: a warning on apply, an error to lint. `false` marks a login
+  that is meant to have no npm access
+- A private repo publishing a package with no `access` is an error to lint
+- Every mirrored member is seated in the npm org as `developer`, unless `npm org ls` already
+  lists them. Seats are never removed
+- A mirrored team, its parents and its children are declared in one file. The parents are
+  checked when the file loads, the children by `octoops lint` on a manifest
+
 ## Permissions
 
 `read`, `write`, `admin`, `maintain`, `triage` — maps to gh API values (`pull`, `push`, etc.) internally
