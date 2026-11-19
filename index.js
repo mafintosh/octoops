@@ -485,6 +485,7 @@ function seed(config, opts = {}) {
   }
 
   if (config.orgSecrets) state.orgSecrets = normalizeOrgSecrets(config.orgSecrets)
+  if (config.npmOrgs) state.npmOrgs = normalizeNpmOrgs(config.npmOrgs)
 
   if (opts.statePath) saveState(opts.statePath, state)
   console.log('seeded state for ' + (config.teams ? config.teams.length + ' teams and ' : '') + (config.repos || []).length + ' repos')
@@ -583,6 +584,8 @@ async function resync(config, opts = {}) {
         if (Object.keys(keep).length) kept[key] = keep
       }
     }
+    // npm orgs are not on GitHub either, so what an apply did there stays
+    if (old.npmOrgs) kept.npmOrgs = old.npmOrgs
     saveState(opts.statePath, kept)
   }
   seed(fresh, { ...opts, keepApps: true })
@@ -697,6 +700,23 @@ async function apply(config, opts = {}) {
 
       if (teamsChanged) {
         state.teams = teamState
+        if (opts.statePath) saveState(opts.statePath, state)
+      }
+    }
+
+    // before repos, a package can only be granted to a team that exists
+    if (config.npmOrgs || state.npmOrgs) {
+      const desired = normalizeNpmOrgs(config.npmOrgs || {})
+      const prevOrgs = state.npmOrgs || {}
+      for (const name of new Set([...Object.keys(desired), ...Object.keys(prevOrgs)])) {
+        if (!changed(desired[name], prevOrgs[name])) continue
+        await reconcileNpmOrg(name, desired[name] || {}, prevOrgs[name] || {}, dry)
+        if (dry) continue
+        // saved per org, a failure in the next one keeps this one's progress
+        const applied = { ...(state.npmOrgs || {}) }
+        if (desired[name]) applied[name] = desired[name]
+        else delete applied[name]
+        state.npmOrgs = applied
         if (opts.statePath) saveState(opts.statePath, state)
       }
     }
@@ -1006,8 +1026,20 @@ const ROOT_KEYS = new Set([
   'presets', 'defaults',
   'repos', 'teams', 'admins', 'members',
   'security', 'runnerGroups', 'hostedRunners', 'pruneOfflineRunners',
-  'apps', 'orgSecrets'
+  'apps', 'orgSecrets', 'npmOrgs'
 ])
+
+const NPM_ORG_KEYS = new Set(['members', 'teams'])
+const NPM_ROLES = new Set(['developer', 'admin', 'owner'])
+const NPM_BLOCK_KEYS = new Set(['package', 'name', 'scope', 'trustedPublishing', 'maintainers', 'deprecated', 'access', 'mfa', 'teams'])
+const NPM_ACCESS = new Set(['public', 'private'])
+const NPM_MFA = new Set(['none', 'publish', 'automation'])
+const NPM_PERMISSIONS = new Set(['read-only', 'read-write'])
+// reconciled one key at a time, a change to one of these leaves the rest of
+// the block (publishers, maintainers, deprecation) alone
+const NPM_ACCESS_KEYS = ['access', 'mfa', 'teams']
+// every npm org has this team and every member is on it
+const NPM_DEFAULT_TEAM = 'developers'
 
 const SECRET_VISIBILITY = new Set(['all', 'private', 'selected'])
 
@@ -1061,6 +1093,7 @@ function validateConfig(config, warn = warnStderr) {
   for (const k of Object.keys(config)) {
     if (!ROOT_KEYS.has(k)) warn('unknown property "' + k + '" at config root' + suggest(k, ROOT_KEYS, null))
   }
+  validateNpmOrgs(config.npmOrgs, warn)
   for (const raw of config.repos || []) {
     for (const k of Object.keys(raw)) {
       if (!REPO_KEYS.has(k)) warn('unknown property "' + k + '" on repo "' + (raw.name || '?') + '"' + suggest(k, REPO_KEYS, REPO_ALIASES))
@@ -1070,6 +1103,7 @@ function validateConfig(config, warn = warnStderr) {
       warn('"renamedFrom" on repo "' + raw.name + '" equals its name and is ignored')
     }
     validateSecretNames(raw.secrets, 'repo "' + (raw.name || '?') + '"')
+    if (raw.deleted !== true) validateNpmBlock(raw, config, warn)
     if (raw.deleted !== true) {
       // apps can arrive through a defaults pack, so check the merged entry
       const where = 'repo "' + (raw.name || '?') + '"'
@@ -1104,6 +1138,88 @@ function validateConfig(config, warn = warnStderr) {
       if (!DEFAULTS_KEYS.has(k)) warn('unknown property "' + k + '" on defaults "' + name + '"' + suggest(k, DEFAULTS_KEYS, null))
     }
     validateMerging(entry && entry.merging, 'defaults "' + name + '"', warn)
+  }
+}
+
+function validateNpmOrgs(npmOrgs, warn = warnStderr) {
+  if (npmOrgs === undefined) return
+  if (!npmOrgs || typeof npmOrgs !== 'object' || Array.isArray(npmOrgs)) throw new Error('npmOrgs must be an object keyed by npm org name')
+
+  for (const org of Object.keys(npmOrgs)) {
+    const where = 'npmOrgs "' + org + '"'
+    if (!/^[a-z0-9][a-z0-9._-]*$/.test(org)) throw new Error(where + ' is not an npm org name, write it without the "@"')
+    const entry = npmOrgs[org]
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error(where + ' must be an object like { "members": [...], "teams": [...] }')
+    for (const k of Object.keys(entry)) {
+      if (!NPM_ORG_KEYS.has(k)) warn('unknown property "' + k + '" in ' + where + suggest(k, NPM_ORG_KEYS, null))
+    }
+
+    const roster = new Set()
+    if (entry.members !== undefined) {
+      if (!Array.isArray(entry.members)) throw new Error('members of ' + where + ' must be a list like [{ "username": "alice", "role": "owner" }]')
+      for (const m of entry.members) {
+        if (!m || typeof m !== 'object' || typeof m.username !== 'string' || !m.username) throw new Error('members of ' + where + ' must be objects with a "username"')
+        if (!NPM_ROLES.has(m.role)) throw new Error('member "' + m.username + '" of ' + where + ' needs a "role" of developer, admin or owner')
+        if (roster.has(m.username)) throw new Error('member "' + m.username + '" is listed twice in ' + where)
+        roster.add(m.username)
+      }
+    }
+
+    if (entry.teams === undefined) continue
+    if (!Array.isArray(entry.teams)) throw new Error('teams of ' + where + ' must be a list like [{ "name": "sdk", "members": ["alice"] }]')
+    const seen = new Set()
+    const missing = []
+    for (const t of entry.teams) {
+      if (!t || typeof t !== 'object' || typeof t.name !== 'string') throw new Error('teams of ' + where + ' must be objects with a "name"')
+      if (!/^[a-z0-9][a-z0-9-]*$/.test(t.name)) throw new Error('team "' + t.name + '" of ' + where + ' is not an npm team name (lowercase letters, digits and hyphens)')
+      if (seen.has(t.name)) throw new Error('team "' + t.name + '" is listed twice in ' + where)
+      seen.add(t.name)
+      for (const k of Object.keys(t)) {
+        if (k !== 'name' && k !== 'members') warn('unknown property "' + k + '" on team "' + t.name + '" of ' + where)
+      }
+      if (t.members !== undefined && (!Array.isArray(t.members) || t.members.some((u) => typeof u !== 'string' || !u))) {
+        throw new Error('members of team "' + t.name + '" of ' + where + ' must be a list of npm usernames')
+      }
+      // a file that holds teams but no roster is a slice of the org, the
+      // roster lives elsewhere and cannot be checked from here
+      if (entry.members === undefined) continue
+      for (const u of t.members || []) if (!roster.has(u)) missing.push(u + ' (team "' + t.name + '")')
+    }
+    if (missing.length) throw new Error('team members not declared in members of ' + where + ':\n  - ' + missing.join('\n  - '))
+  }
+}
+
+// the block as apply will see it: defaults merged, and a legacy bare preset
+// name looked up. "$ref"s are resolved before this runs
+function validateNpmBlock(raw, config, warn = warnStderr) {
+  let block = resolveDefaults(raw, config.defaults).npm
+  if (typeof block === 'string') block = (config.presets || {})[block]
+  if (!block || typeof block !== 'object') return
+
+  for (const npm of Array.isArray(block) ? block : [block]) {
+    if (!npm || typeof npm !== 'object') continue
+    const pkg = npmPackageName(npm, raw.name || '?')
+    const where = 'npm package "' + pkg + '" on repo "' + (raw.name || '?') + '"'
+    for (const k of Object.keys(npm)) {
+      if (!NPM_BLOCK_KEYS.has(k)) warn('unknown property "' + k + '" in ' + where + suggest(k, NPM_BLOCK_KEYS, null))
+    }
+    if (npm.access !== undefined && !NPM_ACCESS.has(npm.access)) throw new Error('access of ' + where + ' must be "public" or "private"')
+    if (npm.mfa !== undefined && !NPM_MFA.has(npm.mfa)) throw new Error('mfa of ' + where + ' must be one of none, publish, automation')
+    const scope = npmScope(pkg)
+    if (npm.access === 'private' && !scope) throw new Error(where + ' is unscoped, only a scoped package can be private')
+
+    if (npm.teams === undefined) continue
+    if (!Array.isArray(npm.teams)) throw new Error('teams of ' + where + ' must be a list like [{ "team": "scope:team", "permission": "read-only" }]')
+    const seen = new Set()
+    for (const g of npm.teams) {
+      if (!g || typeof g !== 'object' || typeof g.team !== 'string' || !/^[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9-]*$/.test(g.team)) {
+        throw new Error('teams of ' + where + ' must name each team as "scope:team"')
+      }
+      if (!NPM_PERMISSIONS.has(g.permission)) throw new Error('team "' + g.team + '" on ' + where + ' needs a "permission" of read-only or read-write')
+      if (seen.has(g.team)) throw new Error('team "' + g.team + '" is granted twice on ' + where)
+      seen.add(g.team)
+      if (scope && g.team.split(':')[0] !== scope) throw new Error('team "' + g.team + '" belongs to another npm org than ' + where)
+    }
   }
 }
 
@@ -1158,7 +1274,60 @@ function lint(configPath) {
     }
   }
 
+  lintNpmOrgs(loaded, problems)
+
   return problems
+}
+
+// an npm org can be sliced over several files, the way a GitHub org is. two
+// files that both hold the same team, or the same roster, would each undo
+// what the other applied, and a grant to a team nobody declares fails on apply
+function lintNpmOrgs(loaded, problems) {
+  const rel = (file) => path.relative(process.cwd(), file)
+  const rosters = new Map()
+  const teams = new Map()
+  const orgs = new Set()
+
+  for (const { file, config } of loaded) {
+    for (const org of Object.keys(config.npmOrgs || {})) {
+      const entry = config.npmOrgs[org] || {}
+      orgs.add(org)
+      if (entry.members) {
+        if (rosters.has(org)) problems.push({ file, level: 'error', message: 'members of npm org "' + org + '" are also declared in ' + rel(rosters.get(org)) + ', keep the roster in one file' })
+        else rosters.set(org, file)
+      }
+      for (const t of entry.teams || []) {
+        const key = org + ':' + t.name
+        if (teams.has(key)) problems.push({ file, level: 'error', message: 'npm team "' + key + '" is also declared in ' + rel(teams.get(key)) + ', keep it in one file' })
+        else teams.set(key, file)
+      }
+    }
+  }
+
+  for (const { file, config } of loaded) {
+    const missing = new Set()
+    for (const raw of config.repos || []) {
+      if (raw.deleted === true) continue
+      let block
+      try {
+        block = resolve(resolveDefaults(raw, config.defaults), config.presets || {}).npm
+      } catch {
+        continue // reported above
+      }
+      for (const npm of Array.isArray(block) ? block : block ? [block] : []) {
+        for (const g of (npm && npm.teams) || []) {
+          if (!g || typeof g.team !== 'string') continue
+          const [org, name] = g.team.split(':')
+          if (name === NPM_DEFAULT_TEAM || teams.has(g.team)) continue
+          // a single file linted on its own cannot see the teams of an org
+          // that is declared elsewhere
+          if (!orgs.has(org) && loaded.length === 1) continue
+          missing.add(g.team)
+        }
+      }
+    }
+    for (const team of missing) problems.push({ file, level: 'error', message: 'npm team "' + team + '" is granted on a package here but declared in none of the linted files' })
+  }
 }
 
 // the repo entries exactly as apply sees them, with extends, defaults and
@@ -1248,7 +1417,7 @@ function expandIncludesInner(configPath, seen) {
   const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
   if (!raw.includes) return [configPath]
 
-  const FORBIDDEN = ['org', 'repos', 'teams', 'admins', 'members', 'security', 'runnerGroups', 'hostedRunners', 'pruneOfflineRunners', 'enterprise', 'extends', 'presets', 'defaults']
+  const FORBIDDEN = ['org', 'repos', 'teams', 'admins', 'members', 'security', 'runnerGroups', 'hostedRunners', 'pruneOfflineRunners', 'enterprise', 'extends', 'presets', 'defaults', 'npmOrgs']
   for (const k of FORBIDDEN) {
     if (k in raw) throw new Error('manifest ' + configPath + ' has both "includes" and "' + k + '" — manifests are orchestration-only')
   }
@@ -3138,11 +3307,17 @@ async function getDeploymentBranchPolicies(org, name, env) {
   return res.branch_policies || []
 }
 
-async function ensureNpmPackage(pkg, dry) {
+async function ensureNpmPackage(pkg, dry, access) {
+  // a private package answers nobody but its readers, without a login it
+  // looks missing and the placeholder below would be published over it
+  const restricted = access === 'private'
+  const blind = restricted && dry && !(await npmUser())
+  if (restricted && !dry) await ensureNpmLogin()
+
   const res = await npm(['view', pkg, 'name'], { allowFailure: true })
   if (res.code === 0 && res.stdout && res.stdout.trim() === pkg) return
 
-  print(dry, 'npm-publish', pkg, 'placeholder 0.0.0')
+  print(dry, 'npm-publish', pkg, 'placeholder 0.0.0' + (restricted ? ', restricted' : '') + (blind ? ', unless it exists (not logged in to npm, cannot tell)' : ''))
   if (dry) return
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'octoops-'))
@@ -3151,7 +3326,7 @@ async function ensureNpmPackage(pkg, dry) {
       path.join(tmp, 'package.json'),
       JSON.stringify({ name: pkg, version: '0.0.0' })
     )
-    await run('npm', ['publish', '--access', 'public'], { cwd: tmp, interactive: true })
+    await run('npm', ['publish', '--access', restricted ? 'restricted' : 'public'], { cwd: tmp, interactive: true })
   } finally {
     fs.rmSync(tmp, { recursive: true })
   }
@@ -3170,11 +3345,12 @@ async function reconcileNpmBlock(org, repo, prev, dry, done) {
       const pkg = npmPackageName(npm, repo.name)
       const was = prevs.find((p) => npmPackageName(p, repo.name) === pkg)
       if (was && !changed(npm, was)) continue
-      await reconcileNpm(org, repo.name, npm, dry, trust)
+      await reconcileNpm(org, repo.name, npm, was, dry, trust)
     }
     // a package gone from the config keeps nothing an apply set up for it.
     // maintainers and deprecation stay, a package needs an owner and the
-    // deprecation was meant for its users, but publishers are revoked
+    // deprecation was meant for its users, but publishers are revoked.
+    // access, mfa and team grants stay as well, it still needs its readers
     const desired = new Set(npms.map((n) => npmPackageName(n, repo.name)))
     for (const was of prevs) {
       const pkg = npmPackageName(was, repo.name)
@@ -3212,7 +3388,32 @@ function desiredTrustedPublishers(org, repoName, tp, registry = 'npm') {
   return desired
 }
 
-async function reconcileNpm(org, repoName, npm, dry, trust) {
+// access, mfa and team grants are each diffed against state on their own.
+// the rest of the block is one unit, as it always was: a change to any of it
+// reconciles publishers, maintainers and deprecation together
+async function reconcileNpm(org, repoName, npm, was, dry, trust) {
+  const pkg = npmPackageName(npm, repoName)
+  let ensured = false
+  const ensure = async () => {
+    if (ensured) return
+    ensured = true
+    await ensureNpmPackage(pkg, dry, npm.access)
+  }
+
+  // access first: a placeholder published for a private package is readable
+  // by the whole org until its grants are set, so nothing goes in between
+  await reconcileNpmAccess(pkg, npm, was || {}, dry, ensure)
+  if (was && !changed(npmWithoutAccess(npm), npmWithoutAccess(was))) return true
+  return reconcileNpmPackage(org, repoName, npm, dry, trust, ensure)
+}
+
+function npmWithoutAccess(npm) {
+  const out = {}
+  for (const k of Object.keys(npm)) if (!NPM_ACCESS_KEYS.includes(k)) out[k] = npm[k]
+  return out
+}
+
+async function reconcileNpmPackage(org, repoName, npm, dry, trust, ensure) {
   const pkg = npmPackageName(npm, repoName)
   const tp = npm.trustedPublishing
   // publishers still in state were set up by an earlier apply. the entry no
@@ -3222,7 +3423,7 @@ async function reconcileNpm(org, repoName, npm, dry, trust) {
   if (!tp && !npm.maintainers && npm.deprecated === undefined && !dropping) return true
 
   // a package that only loses its publishers exists already, no need to look
-  if (!dropping || npm.maintainers || npm.deprecated !== undefined) await ensureNpmPackage(pkg, dry)
+  if (!dropping || npm.maintainers || npm.deprecated !== undefined) await ensure()
 
   let ok = true
   if (npm.maintainers) {
@@ -3248,6 +3449,182 @@ async function reconcileNpm(org, repoName, npm, dry, trust) {
   trust[pkg] = trackPublishers(current, trust[pkg], created)
 
   return ok
+}
+
+function npmScope(pkg) {
+  return pkg[0] === '@' && pkg.includes('/') ? pkg.slice(1, pkg.indexOf('/')) : null
+}
+
+function npmGrants(teams) {
+  return new Map((teams || []).map((g) => [g.team, g.permission]))
+}
+
+// who may read and publish a package, and whether publishing takes 2FA.
+// state decides what changed, nothing is read back from the registry. a key
+// taken out of the config leaves the registry as it is, except team grants:
+// an apply made those, so one no longer listed is revoked
+async function reconcileNpmAccess(pkg, npm, was, dry, ensure) {
+  const accessChanged = npm.access !== undefined && npm.access !== was.access
+  const mfaChanged = npm.mfa !== undefined && npm.mfa !== was.mfa
+  const grants = npmGrants(npm.teams)
+  const prevGrants = npmGrants(was.teams)
+  const grantsChanged = changed([...grants].sort(), [...prevGrants].sort())
+  // an unscoped package is public and cannot be anything else, npm has no
+  // status to set on it
+  const statusChanged = accessChanged && npmScope(pkg) !== null
+  if (!statusChanged && !mfaChanged && !grantsChanged) return
+
+  await ensure()
+
+  if (statusChanged) {
+    print(dry, 'npm-access', pkg, npm.access)
+    if (!dry) await run('npm', ['access', 'set', 'status=' + npm.access, pkg], { interactive: true })
+
+    // npm grants its built-in team on every new package of the org. a private
+    // package is for the teams the config names, so that grant goes first,
+    // before anyone else is let in
+    const everyone = npmScope(pkg) + ':' + NPM_DEFAULT_TEAM
+    if (npm.access === 'private' && !grants.has(everyone)) {
+      print(dry, 'npm-revoke', pkg, everyone)
+      if (!dry) {
+        const res = await run('npm', ['access', 'revoke', everyone, pkg], { interactive: true, allowFailure: true })
+        if (res.code !== 0) print(dry, 'warn-npm-access', pkg, 'npm access revoke ' + everyone + ' failed - check who can read the package')
+      }
+    }
+  }
+
+  for (const [team, permission] of grants) {
+    if (prevGrants.get(team) === permission) continue
+    print(dry, 'npm-grant', pkg, team + ' -> ' + permission)
+    if (!dry) await run('npm', ['access', 'grant', permission, team, pkg], { interactive: true })
+  }
+
+  for (const [team] of prevGrants) {
+    if (grants.has(team)) continue
+    print(dry, 'npm-revoke', pkg, team)
+    if (!dry) {
+      const res = await run('npm', ['access', 'revoke', team, pkg], { interactive: true, allowFailure: true })
+      if (res.code !== 0) print(dry, 'warn-npm-access', pkg, 'npm access revoke ' + team + ' failed')
+    }
+  }
+
+  if (mfaChanged) {
+    print(dry, 'npm-mfa', pkg, npm.mfa)
+    if (!dry) await run('npm', ['access', 'set', 'mfa=' + npm.mfa, pkg], { interactive: true })
+  }
+}
+
+// sorted so that reordering the config is not a change
+function normalizeNpmOrgs(npmOrgs) {
+  const out = {}
+  for (const org of Object.keys(npmOrgs).sort()) {
+    const entry = npmOrgs[org] || {}
+    const norm = {}
+    if (entry.members) {
+      norm.members = {}
+      for (const m of entry.members.slice().sort((a, b) => (a.username < b.username ? -1 : 1))) norm.members[m.username] = m.role
+    }
+    if (entry.teams) {
+      norm.teams = {}
+      for (const t of entry.teams.slice().sort((a, b) => (a.name < b.name ? -1 : 1))) norm.teams[t.name] = [...new Set(t.members || [])].sort()
+    }
+    if (Object.keys(norm).length) out[org] = norm
+  }
+  return out
+}
+
+// members and teams of one npm org, as far as this config file declares
+// them. like everything an apply records, what is in state and no longer in
+// the config is removed. the roster first: npm only lets a member of the org
+// join a team
+async function reconcileNpmOrg(org, want, prev, dry) {
+  const members = want.members || {}
+  const prevMembers = prev.members || {}
+  const teams = want.teams || {}
+  const prevTeams = prev.teams || {}
+
+  // whoever runs the apply is never removed or demoted, that is how an org
+  // ends up with nobody left to fix it
+  const risky = Object.keys(prevMembers).some((u) => members[u] !== prevMembers[u])
+  const me = risky ? await npmUser() : ''
+
+  for (const user of Object.keys(members)) {
+    if (prevMembers[user] === members[user]) continue
+    if (user === me && prevMembers[user] === 'owner') {
+      print(dry, 'npm-keep-self', org, user + ' (would become ' + members[user] + ' but caller)')
+      continue
+    }
+    print(dry, 'npm-org-set', org, user + ' -> ' + members[user])
+    if (!dry) await run('npm', ['org', 'set', org, user, members[user]], { interactive: true })
+  }
+
+  let live = null
+  for (const name of Object.keys(teams)) {
+    const team = org + ':' + name
+    const wasMembers = new Set(prevTeams[name] || [])
+
+    if (!prevTeams[name]) {
+      // no state for it does not mean it is not there, and npm refuses to
+      // create a team twice
+      if (!dry && !live) live = await listNpmTeams(org)
+      if (!live || !live.has(team)) {
+        print(dry, 'npm-team-create', team)
+        if (!dry) await run('npm', ['team', 'create', team], { interactive: true })
+      }
+    }
+
+    for (const user of teams[name]) {
+      if (wasMembers.has(user)) continue
+      print(dry, 'npm-team-add', team, user)
+      if (!dry) await run('npm', ['team', 'add', team, user], { interactive: true })
+    }
+
+    for (const user of wasMembers) {
+      if (teams[name].includes(user)) continue
+      print(dry, 'npm-team-rm', team, user)
+      if (!dry) await run('npm', ['team', 'rm', team, user], { interactive: true })
+    }
+  }
+
+  for (const name of Object.keys(prevTeams)) {
+    if (teams[name]) continue
+    const team = org + ':' + name
+    if (name === NPM_DEFAULT_TEAM) {
+      print(dry, 'npm-team-keep', team, 'built in, npm does not let it go')
+      continue
+    }
+    print(dry, 'npm-team-destroy', team)
+    if (!dry) await run('npm', ['team', 'destroy', team], { interactive: true })
+  }
+
+  // last, so nobody is put out of the org while still on one of its teams
+  for (const user of Object.keys(prevMembers)) {
+    if (members[user]) continue
+    if (user === me) {
+      print(dry, 'npm-keep-self', org, user + ' (would remove but caller)')
+      continue
+    }
+    print(dry, 'npm-org-rm', org, user)
+    if (!dry) await run('npm', ['org', 'rm', org, user], { interactive: true })
+  }
+}
+
+async function listNpmTeams(org) {
+  const out = await npm(['team', 'ls', org, '--json'])
+  const parsed = out ? JSON.parse(out) : []
+  if (!Array.isArray(parsed)) throw new Error('npm team ls ' + org + ' did not print a list')
+  // "org:team", tolerate a bare team name or a leading "@" as well
+  return new Set(parsed.map((t) => String(t).replace(/^@/, '')).map((t) => (t.includes(':') ? t : org + ':' + t)))
+}
+
+// the npm username of whoever is logged in, empty when nobody is. asked once
+let npmUserName = null
+
+function npmUser() {
+  if (!npmUserName) {
+    npmUserName = run('npm', ['whoami'], { allowFailure: true }).then((res) => (res.code === 0 ? res.stdout.trim() : ''))
+  }
+  return npmUserName
 }
 
 // revokes every publisher bound to this repo and drops the package from state.
@@ -3355,7 +3732,7 @@ async function reconcileNpmTrust(org, repo, prev, dry, done, opts) {
       // window. its entry and clock stay, lifting the deprecation makes it
       // overdue at once and the next apply judges it
       if (npm.deprecated) continue
-      await checkNpmTrust(pkg, `${org}/${repo.name}`, desired, trust, dry, opts)
+      await checkNpmTrust(pkg, `${org}/${repo.name}`, desired, trust, dry, { ...opts, restricted: npm.access === 'private' })
     }
   }
 
@@ -3378,7 +3755,7 @@ async function checkNpmTrust(pkg, repository, desired, trust, dry, opts) {
 
   let packument
   try {
-    packument = await fetchPackument(pkg)
+    packument = opts.restricted ? await viewPackument(pkg, dry) : await fetchPackument(pkg)
   } catch (err) {
     // a registry hiccup is no reason to guess, the next apply looks again
     print(dry, 'npm-trust-skip', pkg, 'could not read registry: ' + err.message)
@@ -3518,6 +3895,25 @@ async function fetchPackument(pkg) {
   if (res.status === 404) return null
   if (!res.ok) throw new Error('registry returned ' + res.status)
   return res.json()
+}
+
+// a private package is not served to an anonymous fetch, so it is read
+// through npm, which is logged in. npm view only gives the latest version,
+// that is enough to see a trusted publish as long as it is the last one
+async function viewPackument(pkg, dry) {
+  if (dry && !(await npmUser())) throw new Error('private package, not logged in to npm')
+  if (!dry) await ensureNpmLogin()
+
+  const res = await npm(['view', pkg, '--json'], { allowFailure: true })
+  if (res.code !== 0) {
+    if (/404|E404|not found/i.test(res.stderr + res.stdout)) return null
+    throw new Error('npm view ' + pkg + ' failed: ' + res.stderr)
+  }
+
+  const parsed = JSON.parse(res.stdout)
+  const latest = Array.isArray(parsed) ? parsed[parsed.length - 1] : parsed
+  if (!latest || !latest.version) return null
+  return { time: latest.time || {}, versions: { [latest.version]: { _npmUser: latest._npmUser, dist: latest.dist } } }
 }
 
 // the registry marks a version published through a trusted publisher on its

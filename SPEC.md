@@ -70,7 +70,7 @@ reconciles actual state with desired state using `gh api` calls.
 7. Apply branch protection rules
 8. Set up environments with team reviewers
 9. Apply rulesets (create or update by name)
-10. Set up npm trusted publishing (OIDC) if `npm` config present
+10. Set up npm trusted publishing (OIDC) if `npm` config present, and package access (`access`, `mfa`, `teams`), each key on its own
 11. Set up crates.io trusted publishing (OIDC) if `crates` config present, publishing a placeholder 0.0.0 first for a crate that doesn't exist
 
 ## Behavior
@@ -99,6 +99,27 @@ list, so existing configs keep working unchanged.
   `npm trust github` and every add fails
 - `--dry-run` prints each declared publisher without reading the registry, so it shows what is
   declared rather than what would change
+
+## npm organizations and package access
+
+`npmOrgs` at the config root is keyed by npm org name and holds `members` (`username`, `role`)
+and `teams` (`name`, `members`). It is reconciled before repos.
+
+- Roster first, then teams, then team members. Removals run last
+- In state and no longer in the config means removed: `npm org rm`, `npm team destroy`,
+  `npm team rm`
+- The caller is never removed from a roster or demoted from `owner`
+- A team is created only if `npm team ls` does not list it
+
+On the repo `npm` block:
+
+- `access` (`public` | `private`) runs `npm access set status=`. Private needs a scoped package
+- `mfa` (`none` | `publish` | `automation`) runs `npm access set mfa=`
+- `teams` (`{ team: "scope:team", permission: "read-only" | "read-write" }`) runs
+  `npm access grant` and `npm access revoke`
+- Going private revokes the org's `developers` team first, unless `teams` lists it
+- The three keys are diffed one by one. The rest of the block stays one unit
+- Access is set before publishers and maintainers, straight after the placeholder publish
 
 ## Permissions
 
