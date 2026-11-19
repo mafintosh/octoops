@@ -45,7 +45,7 @@ octoops lint config.json
 octoops lint org-manifest.json
 ```
 
-It runs every check `apply` does before its first API call (unknown properties, unknown presets and defaults, malformed secrets, team members missing from `admins`/`members`, an app declared in two places) and exits non-zero on an error. Given a manifest it lints each included file and also catches an app that sits in the root `apps` list of one file and on a repo entry in another.
+It runs every check `apply` does before its first API call (unknown properties, unknown presets and defaults, malformed secrets, team members missing from `admins`/`members`, an app declared in two places, malformed `npmOrgs` and npm package access) and exits non-zero on an error. Given a manifest it lints each included file and also catches an app that sits in the root `apps` list of one file and on a repo entry in another, an npm team or npm roster declared in two files, a package granted to an npm team no file declares or mirrors, and a mirrored team whose child sits in another file. Two more are errors to lint, though an apply goes ahead: a member of a mirrored team with no `npmUsers` entry, and a private repo that publishes a public package.
 
 Print a repo entry the way `apply` sees it, with `extends`, `defaults` and presets all resolved:
 
@@ -225,7 +225,7 @@ Top-level repo fields for basic settings:
 
 Omitting a field leaves the current GitHub value untouched. Setting it makes octoops reconcile it.
 
-That holds for plain settings. Anything an apply created and recorded in state (teams, collaborators, topics, branch protection, rulesets, environments, secrets, npm trusted publishers, app repo access, org teams, org members, org secrets, runner groups, hosted runners) follows one rule: in state but no longer in the config means it is removed on the next apply. Removing a whole key is the same as emptying it. State is the only thing that drives this, so anything made by hand that no apply ever recorded is left alone; `resync` brings such things into state. The exceptions are a repo entry itself (needs `deleted: true`, see below) and values that cannot be unset, such as npm maintainers and deprecation.
+That holds for plain settings. Anything an apply created and recorded in state (teams, collaborators, topics, branch protection, rulesets, environments, secrets, npm trusted publishers, npm team grants on a package, npm org members and teams, app repo access, org teams, org members, org secrets, runner groups, hosted runners) follows one rule: in state but no longer in the config means it is removed on the next apply. Removing a whole key is the same as emptying it. State is the only thing that drives this, so anything made by hand that no apply ever recorded is left alone; `resync` brings such things into state. The exceptions are a repo entry itself (needs `deleted: true`, see below) and values that cannot be unset, such as npm maintainers and deprecation.
 
 ### Sharing config across files
 
@@ -968,7 +968,7 @@ octoops npm-trust config.json                 # every publisher, with its clock
 octoops npm-trust config.json --unconfirmed   # only those still waiting on a trusted publish
 ```
 
-It takes a manifest with `includes` as well, and reads the same state an apply would. A `confirmed` entry means the registry has seen a publish through that publisher after `setAt`, which npm never expires. It does not mean the publisher still exists: one revoked by hand on npm, or revoked and recreated, looks the same from the outside. Only `npm trust list` can tell, so if that might have happened, edit the `npm` block (or `seed` the repo) to force a resync.
+It takes a manifest with `includes` as well, and reads the same state an apply would. A `confirmed` entry means the registry has seen a publish through that publisher after `setAt`, which npm never expires. It does not mean the publisher still exists: one revoked by hand on npm, or revoked and recreated, looks the same from the outside. Only `npm trust list` can tell, so if that might have happened, edit the `npm` block (anything in it but `access`, `mfa` and `teams`), or `seed` the repo, to force a resync.
 
 Publishers seen for the first time without a `setAt`, such as state from before this feature or a fresh `seed`/`resync`, are confirmed if any version at all was published through them. If none was, the clock starts at that apply (`npm-trust-track`), so a publisher that already expired is recreated within two days instead of failing the next release. Archived repos are skipped: their workflow can't run, so there is nothing to confirm. Deprecated packages (`deprecated` set to a message or `true`) are not renewed either: a publisher that never published is left to expire rather than recreated every window for a package nobody means to release again. Its entry keeps its clock, so lifting the deprecation makes it overdue at once and the next apply checks and renews it. Removing a workflow from `trustedPublishing` revokes that publisher on npm and drops its entry. Removing `trustedPublishing` from a package still in the state revokes every publisher of this repo on npm (`npm-untrust`, needs an npm login) and drops the package from the state.
 
@@ -1000,6 +1000,118 @@ You can also deprecate a package:
 Like every other field, deprecation is only reconciled when the `npm` block differs from recorded state — a matching re-apply does nothing. When it does run, octoops checks the live registry first and only calls `npm deprecate` if the current message actually differs (`npm-deprecate` / `npm-undeprecate` log lines). If the package isn't on npm yet you'll see a `skip-deprecate` line.
 
 This also works on **archived** repos: the npm registry is independent of GitHub's archive flag, so octoops still reconciles deprecation (and other npm state) even when `archived: true` — deprecating a package while archiving its repo is the common case.
+
+### npm organizations and teams
+
+```json
+{
+  "org": "my-org",
+  "npmOrgs": {
+    "my-scope": {
+      "members": [
+        { "username": "alice", "role": "owner" },
+        { "username": "bob", "role": "developer" }
+      ],
+      "teams": [
+        { "name": "sdk", "members": ["alice", "bob"] },
+        { "name": "sdk-publish", "members": ["alice"] }
+      ]
+    }
+  }
+}
+```
+
+`npmOrgs` is keyed by npm org name: the scope without its `@`. It does not depend on `org`. One GitHub org can publish to several npm orgs, and several files can each hold part of one.
+
+- `members` is the roster. `role` is `developer`, `admin` or `owner`.
+- `teams` lists teams and who is on them.
+- Usernames are npm usernames, not GitHub logins.
+
+npm orgs are reconciled before repos: roster, then teams, then team members. Like the rest of state, what an apply added and the config no longer lists is removed: the member leaves the org, the team is destroyed, the user leaves the team. The caller is never removed from a roster nor demoted from `owner` (`npm-keep-self`).
+
+A file may hold teams without a roster. npm only lets a member of the org join a team, so apply the file with the roster first. Keep each team, and each roster, in one file: two files holding the same one undo each other, and `octoops lint` on a manifest reports it.
+
+The caller needs an npm login that is an owner or admin of the org.
+
+#### Package access
+
+```json
+"npm": {
+  "package": "@my-scope/foo",
+  "access": "private",
+  "mfa": "publish",
+  "teams": [
+    { "team": "my-scope:sdk-publish", "permission": "read-write" },
+    { "team": "my-scope:sdk", "permission": "read-only" }
+  ],
+  "trustedPublishing": { "workflow": "publish.yml", "environment": "npm" }
+}
+```
+
+- `access` is `public` or `private`. Only a scoped package can be private. A package that does not exist yet gets its placeholder published restricted.
+- `mfa` is what publishing requires. `none`: nothing. `publish`: two-factor authentication, which a token cannot stand in for. `automation`: two-factor authentication, or an automation token.
+- `teams` grants `read-only` or `read-write` to teams of the package's own npm org, written `scope:team`. A grant taken off the list is revoked.
+
+A private package is for the teams it names. npm's built-in `developers` team, which holds every member of the org, loses its access to the package unless `teams` lists it.
+
+Each of the three keys is diffed against state on its own. Changing one runs one npm command for that package and leaves its publishers, maintainers and deprecation alone. Taking `access` or `mfa` out of the config leaves the registry as it is.
+
+A private package cannot be read anonymously, so whether its trusted publisher has published is read through `npm view`, which only shows the latest version.
+
+#### Mirroring GitHub teams
+
+Each mirrored GitHub team has an npm team of the same name, holding its members and its child teams' members. Whatever the GitHub team's permission on a repo, the npm team can install the repo's private package and cannot publish it. Packages publish through trusted publishing, or by a team granted `read-write` explicitly.
+
+Name the teams to mirror, in the file that declares them:
+
+```json
+{
+  "org": "my-org",
+  "npmUsers": { "Alice": "alice", "bob": "bob-on-npm" },
+  "teams": [
+    { "name": "sdk", "members": [{ "username": "bob", "role": "member" }] },
+    { "name": "sdk-write", "parent": "sdk", "members": [{ "username": "Alice", "role": "member" }] }
+  ],
+  "npmOrgs": {
+    "my-scope": { "mirror": ["sdk", "sdk-write"] }
+  }
+}
+```
+
+and ask for the repo's teams on the package:
+
+```json
+{
+  "name": "foo",
+  "private": true,
+  "teams": [
+    { "name": "sdk", "permission": "read" },
+    { "name": "sdk-write", "permission": "write" }
+  ],
+  "npm": { "package": "@my-scope/foo", "access": "private", "mirrorTeams": true }
+}
+```
+
+That is the same as writing npm teams `sdk` (bob-on-npm, alice) and `sdk-write` (alice), and granting both `read-only` on `@my-scope/foo`. `octoops preview` shows the grants. `teams` on the package still works next to `mirrorTeams`, and wins for a team named in both.
+
+`npmUsers` maps GitHub logins to npm usernames. Put it in one file and `extends` it from the others.
+
+Rules:
+
+- A mirrored team, its parents and its children are declared in one file.
+- Every team a repo grants is mirrored into its package's scope.
+- A login with no `npmUsers` entry gets no access, and is an error to `octoops lint`. Map it to `false` for someone who is meant to have none.
+- A mirrored member gets a `developer` seat in the npm org. Leaving the team takes them off the npm team, the seat stays.
+- npm's built-in `developers` team holds every org member and reads no private package.
+
+Not mirrored:
+
+- Collaborators cannot install. Put them on a team.
+- GitHub org owners cannot install without an npm role or team.
+- CI and bots cannot install without a read token.
+- Every org member can read a new private package until its first apply finishes.
+
+A private repo whose package has no `access` publishes its code to everyone. `octoops lint` reports that as an error until the package says `"access": "private"` or `"access": "public"`.
 
 ### PyPI trusted publishing (OIDC)
 

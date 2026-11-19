@@ -70,7 +70,7 @@ reconciles actual state with desired state using `gh api` calls.
 7. Apply branch protection rules
 8. Set up environments with team reviewers
 9. Apply rulesets (create or update by name)
-10. Set up npm trusted publishing (OIDC) if `npm` config present
+10. Set up npm trusted publishing (OIDC) if `npm` config present, and package access (`access`, `mfa`, `teams`), each key on its own
 11. Set up crates.io trusted publishing (OIDC) if `crates` config present, publishing a placeholder 0.0.0 first for a crate that doesn't exist
 
 ## Behavior
@@ -99,6 +99,46 @@ list, so existing configs keep working unchanged.
   `npm trust github` and every add fails
 - `--dry-run` prints each declared publisher without reading the registry, so it shows what is
   declared rather than what would change
+
+## npm organizations and package access
+
+`npmOrgs` at the config root is keyed by npm org name and holds `members` (`username`, `role`)
+and `teams` (`name`, `members`). It is reconciled before repos.
+
+- Roster first, then teams, then team members. Removals run last
+- In state and no longer in the config means removed: `npm org rm`, `npm team destroy`,
+  `npm team rm`
+- The caller is never removed from a roster or demoted from `owner`
+- A team is created only if `npm team ls` does not list it
+
+On the repo `npm` block:
+
+- `access` (`public` | `private`) runs `npm access set status=`. Private needs a scoped package
+- `mfa` (`none` | `publish` | `automation`) runs `npm access set mfa=`
+- `teams` (`{ team: "scope:team", permission: "read-only" | "read-write" }`) runs
+  `npm access grant` and `npm access revoke`
+- Going private revokes the org's `developers` team first, unless `teams` lists it
+- The three keys are diffed one by one. The rest of the block stays one unit
+- Access is set before publishers and maintainers, straight after the placeholder publish
+
+## Mirroring GitHub teams to npm
+
+Two directives are rewritten into the explicit shape above when a config is loaded, so apply,
+lint, seed and preview only see npm teams and grants spelled out.
+
+- `npmOrgs.<org>.mirror` lists GitHub teams of the same file. Each becomes an npm team named
+  after it, holding its members and those of every team below it, translated through
+  `npmUsers`
+- `npm.mirrorTeams: true` grants `read-only` to the npm team of every team in the repo's
+  `teams`, whatever its GitHub permission. `read-write` is never derived
+- `npmUsers` maps GitHub logins (matched without case) to npm usernames. A login without an
+  entry is left off the team: a warning on apply, an error to lint. `false` marks a login
+  that is meant to have no npm access
+- A private repo publishing a package with no `access` is an error to lint
+- Every mirrored member is seated in the npm org as `developer`, unless `npm org ls` already
+  lists them. Seats are never removed
+- A mirrored team, its parents and its children are declared in one file. The parents are
+  checked when the file loads, the children by `octoops lint` on a manifest
 
 ## Permissions
 
