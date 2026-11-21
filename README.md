@@ -772,6 +772,21 @@ GitHub flags this API as beta — the parameter shape may change on their side.
 
 Removing someone from the org also removes them from all teams. If that person is still listed in a team config, the next apply will re-add them. Make sure `admins`/`members` is the superset of everyone referenced in `teams`.
 
+A member can be a record, which also says who they are on npm:
+
+```json
+"members": [
+  "charlie",
+  { "github": "dave", "npm": "dave-on-npm" },
+  { "github": "eve" }
+]
+```
+
+`charlie` has the same username on GitHub and npm. `dave` has a different one. `eve` has no npm account. Everywhere else a config names a person (a team, a collaborator, a reviewer) it is by their GitHub login. `admins` takes records as well.
+
+GitHub is sent the same list of logins either way, and state holds that list, so turning strings into records changes nothing on an apply. Nothing reads `npm` yet: the record is where a person's other identities are kept, for the features that need them.
+
+
 ### Manage org teams
 
 ```json
