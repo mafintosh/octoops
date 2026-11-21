@@ -100,6 +100,18 @@ list, so existing configs keep working unchanged.
 - `--dry-run` prints each declared publisher without reading the registry, so it shows what is
   declared rather than what would change
 
+## Members
+
+An entry of `admins` or `members` is a GitHub login, or a record `{ github, npm }`.
+
+- A string is someone with the same username on npm, in lower case. A record without `npm` is
+  someone with no npm account
+- Records fold down to lists of GitHub logins when a config is loaded. Apply, state, seed and
+  resync see only those lists, as before
+- The same login with two different `npm` values is an error
+- A record may carry `role`, `admin` or `member`. An admin record in `members` is the same as
+  that login in `admins`: both produce the same two lists of logins, in config and in state
+
 ## Permissions
 
 `read`, `write`, `admin`, `maintain`, `triage` — maps to gh API values (`pull`, `push`, etc.) internally

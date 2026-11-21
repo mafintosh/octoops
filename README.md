@@ -772,6 +772,33 @@ GitHub flags this API as beta — the parameter shape may change on their side.
 
 Removing someone from the org also removes them from all teams. If that person is still listed in a team config, the next apply will re-add them. Make sure `admins`/`members` is the superset of everyone referenced in `teams`.
 
+A member can be a record, which also says who they are on npm:
+
+```json
+"members": [
+  "charlie",
+  { "github": "dave", "npm": "dave-on-npm" },
+  { "github": "eve" }
+]
+```
+
+`charlie` has the same username on GitHub and npm. `dave` has a different one. `eve` has no npm account. Everywhere else a config names a person (a team, a collaborator, a reviewer) it is by their GitHub login. `admins` takes records as well.
+
+GitHub is sent the same list of logins either way, and state holds that list, so turning strings into records changes nothing on an apply. Nothing reads `npm` yet: the record is where a person's other identities are kept, for the features that need them.
+
+A record can also say the person's role, which lets one list hold everybody:
+
+```json
+"members": [
+  { "github": "alice", "npm": "alice", "role": "admin" },
+  "charlie",
+  { "github": "dave", "npm": "dave-on-npm" }
+]
+```
+
+`role` is `admin` or `member`, and `member` when left out. That is the same as `"admins": ["alice"]` next to the other two. The two forms read the same state, so a config can move from one to the other without an apply noticing. A `members` list in which no record is an admin leaves the admins unmanaged, as a config without `admins` always has.
+
+
 ### Manage org teams
 
 ```json
