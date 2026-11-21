@@ -786,6 +786,18 @@ A member can be a record, which also says who they are on npm:
 
 GitHub is sent the same list of logins either way, and state holds that list, so turning strings into records changes nothing on an apply. Nothing reads `npm` yet: the record is where a person's other identities are kept, for the features that need them.
 
+A record can also say the person's role, which lets one list hold everybody:
+
+```json
+"members": [
+  { "github": "alice", "npm": "alice", "role": "admin" },
+  "charlie",
+  { "github": "dave", "npm": "dave-on-npm" }
+]
+```
+
+`role` is `admin` or `member`, and `member` when left out. That is the same as `"admins": ["alice"]` next to the other two. The two forms read the same state, so a config can move from one to the other without an apply noticing. A `members` list in which no record is an admin leaves the admins unmanaged, as a config without `admins` always has.
+
 
 ### Manage org teams
 

@@ -109,6 +109,8 @@ An entry of `admins` or `members` is a GitHub login, or a record `{ github, npm 
 - Records fold down to lists of GitHub logins when a config is loaded. Apply, state, seed and
   resync see only those lists, as before
 - The same login with two different `npm` values is an error
+- A record may carry `role`, `admin` or `member`. An admin record in `members` is the same as
+  that login in `admins`: both produce the same two lists of logins, in config and in state
 
 ## Permissions
 
