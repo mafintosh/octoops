@@ -1009,6 +1009,12 @@ const ROOT_KEYS = new Set([
   'apps', 'orgSecrets'
 ])
 
+const NPM_BLOCK_KEYS = new Set(['package', 'name', 'scope', 'trustedPublishing', 'maintainers', 'deprecated', 'mfa'])
+const NPM_MFA = new Set(['none', 'publish', 'automation'])
+// reconciled one key at a time, a change to one of these leaves the rest of
+// the block (publishers, maintainers, deprecation) alone
+const NPM_ACCESS_KEYS = ['mfa']
+
 const SECRET_VISIBILITY = new Set(['all', 'private', 'selected'])
 
 const REPO_KEYS = new Set([
@@ -1070,6 +1076,7 @@ function validateConfig(config, warn = warnStderr) {
       warn('"renamedFrom" on repo "' + raw.name + '" equals its name and is ignored')
     }
     validateSecretNames(raw.secrets, 'repo "' + (raw.name || '?') + '"')
+    if (raw.deleted !== true) validateNpmBlock(raw, config, warn)
     if (raw.deleted !== true) {
       // apps can arrive through a defaults pack, so check the merged entry
       const where = 'repo "' + (raw.name || '?') + '"'
@@ -1104,6 +1111,23 @@ function validateConfig(config, warn = warnStderr) {
       if (!DEFAULTS_KEYS.has(k)) warn('unknown property "' + k + '" on defaults "' + name + '"' + suggest(k, DEFAULTS_KEYS, null))
     }
     validateMerging(entry && entry.merging, 'defaults "' + name + '"', warn)
+  }
+}
+
+// the block as apply will see it: defaults merged, and a legacy bare preset
+// name looked up. "$ref"s are resolved before this runs
+function validateNpmBlock(raw, config, warn = warnStderr) {
+  let block = resolveDefaults(raw, config.defaults).npm
+  if (typeof block === 'string') block = (config.presets || {})[block]
+  if (!block || typeof block !== 'object') return
+
+  for (const npm of Array.isArray(block) ? block : [block]) {
+    if (!npm || typeof npm !== 'object') continue
+    const where = 'npm package "' + npmPackageName(npm, raw.name || '?') + '" on repo "' + (raw.name || '?') + '"'
+    for (const k of Object.keys(npm)) {
+      if (!NPM_BLOCK_KEYS.has(k)) warn('unknown property "' + k + '" in ' + where + suggest(k, NPM_BLOCK_KEYS, null))
+    }
+    if (npm.mfa !== undefined && !NPM_MFA.has(npm.mfa)) throw new Error('mfa of ' + where + ' must be one of none, publish, automation')
   }
 }
 
@@ -3170,7 +3194,7 @@ async function reconcileNpmBlock(org, repo, prev, dry, done) {
       const pkg = npmPackageName(npm, repo.name)
       const was = prevs.find((p) => npmPackageName(p, repo.name) === pkg)
       if (was && !changed(npm, was)) continue
-      await reconcileNpm(org, repo.name, npm, dry, trust)
+      await reconcileNpm(org, repo.name, npm, was, dry, trust)
     }
     // a package gone from the config keeps nothing an apply set up for it.
     // maintainers and deprecation stay, a package needs an owner and the
@@ -3212,7 +3236,42 @@ function desiredTrustedPublishers(org, repoName, tp, registry = 'npm') {
   return desired
 }
 
-async function reconcileNpm(org, repoName, npm, dry, trust) {
+// mfa is diffed against state on its own. the rest of the block is one unit,
+// as it always was: a change to any of it reconciles publishers, maintainers
+// and deprecation together
+async function reconcileNpm(org, repoName, npm, was, dry, trust) {
+  const pkg = npmPackageName(npm, repoName)
+  let ensured = false
+  const ensure = async () => {
+    if (ensured) return
+    ensured = true
+    await ensureNpmPackage(pkg, dry)
+  }
+
+  await reconcileNpmAccess(pkg, npm, was || {}, dry, ensure)
+  if (was && !changed(npmWithoutAccess(npm), npmWithoutAccess(was))) return true
+  return reconcileNpmPackage(org, repoName, npm, dry, trust, ensure)
+}
+
+function npmWithoutAccess(npm) {
+  const out = {}
+  for (const k of Object.keys(npm)) if (!NPM_ACCESS_KEYS.includes(k)) out[k] = npm[k]
+  return out
+}
+
+// whether publishing the package takes 2FA. state decides what changed,
+// nothing is read back from the registry, which has no way to ask. taking
+// the key out of the config leaves the registry as it is
+async function reconcileNpmAccess(pkg, npm, was, dry, ensure) {
+  if (npm.mfa === undefined || npm.mfa === was.mfa) return
+
+  await ensure()
+
+  print(dry, 'npm-mfa', pkg, npm.mfa)
+  if (!dry) await run('npm', ['access', 'set', 'mfa=' + npm.mfa, pkg], { interactive: true })
+}
+
+async function reconcileNpmPackage(org, repoName, npm, dry, trust, ensure) {
   const pkg = npmPackageName(npm, repoName)
   const tp = npm.trustedPublishing
   // publishers still in state were set up by an earlier apply. the entry no
@@ -3222,7 +3281,7 @@ async function reconcileNpm(org, repoName, npm, dry, trust) {
   if (!tp && !npm.maintainers && npm.deprecated === undefined && !dropping) return true
 
   // a package that only loses its publishers exists already, no need to look
-  if (!dropping || npm.maintainers || npm.deprecated !== undefined) await ensureNpmPackage(pkg, dry)
+  if (!dropping || npm.maintainers || npm.deprecated !== undefined) await ensure()
 
   let ok = true
   if (npm.maintainers) {
