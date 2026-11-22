@@ -100,6 +100,14 @@ list, so existing configs keep working unchanged.
 - `--dry-run` prints each declared publisher without reading the registry, so it shows what is
   declared rather than what would change
 
+## npm publishing requirement
+
+`mfa` on the `npm` block (`none` | `publish` | `automation`) runs `npm access set mfa=`.
+
+- Diffed against state on its own. The rest of the block stays one unit
+- Set before publishers and maintainers
+- Never read back, the registry has no way to ask. Removing the key changes nothing
+
 ## Permissions
 
 `read`, `write`, `admin`, `maintain`, `triage` — maps to gh API values (`pull`, `push`, etc.) internally

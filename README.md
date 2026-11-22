@@ -968,7 +968,7 @@ octoops npm-trust config.json                 # every publisher, with its clock
 octoops npm-trust config.json --unconfirmed   # only those still waiting on a trusted publish
 ```
 
-It takes a manifest with `includes` as well, and reads the same state an apply would. A `confirmed` entry means the registry has seen a publish through that publisher after `setAt`, which npm never expires. It does not mean the publisher still exists: one revoked by hand on npm, or revoked and recreated, looks the same from the outside. Only `npm trust list` can tell, so if that might have happened, edit the `npm` block (or `seed` the repo) to force a resync.
+It takes a manifest with `includes` as well, and reads the same state an apply would. A `confirmed` entry means the registry has seen a publish through that publisher after `setAt`, which npm never expires. It does not mean the publisher still exists: one revoked by hand on npm, or revoked and recreated, looks the same from the outside. Only `npm trust list` can tell, so if that might have happened, edit the `npm` block (anything in it but `mfa`), or `seed` the repo, to force a resync.
 
 Publishers seen for the first time without a `setAt`, such as state from before this feature or a fresh `seed`/`resync`, are confirmed if any version at all was published through them. If none was, the clock starts at that apply (`npm-trust-track`), so a publisher that already expired is recreated within two days instead of failing the next release. Archived repos are skipped: their workflow can't run, so there is nothing to confirm. Deprecated packages (`deprecated` set to a message or `true`) are not renewed either: a publisher that never published is left to expire rather than recreated every window for a package nobody means to release again. Its entry keeps its clock, so lifting the deprecation makes it overdue at once and the next apply checks and renews it. Removing a workflow from `trustedPublishing` revokes that publisher on npm and drops its entry. Removing `trustedPublishing` from a package still in the state revokes every publisher of this repo on npm (`npm-untrust`, needs an npm login) and drops the package from the state.
 
@@ -998,6 +998,21 @@ You can also deprecate a package:
 - `deprecated` — optional. A string is used as the deprecation message. `true` uses the default message `This package is deprecated`. `false` (or `""`) clears an existing deprecation. Omit it entirely to leave deprecation unmanaged.
 
 Like every other field, deprecation is only reconciled when the `npm` block differs from recorded state — a matching re-apply does nothing. When it does run, octoops checks the live registry first and only calls `npm deprecate` if the current message actually differs (`npm-deprecate` / `npm-undeprecate` log lines). If the package isn't on npm yet you'll see a `skip-deprecate` line.
+
+You can also say what publishing the package requires:
+
+```json
+"npm": {
+  "package": "my-module",
+  "mfa": "publish"
+}
+```
+
+- `mfa` — optional. `none`: publishing needs no second factor. `publish`: it needs two-factor authentication, which a token cannot stand in for. `automation`: two-factor authentication, or an automation token. Omit it to leave the setting unmanaged.
+
+`mfa` is diffed against state on its own. Changing it runs one `npm access set` for that package (`npm-mfa` log line) and leaves its publishers, maintainers and deprecation alone, so adding it to a preset shared by many packages does not send each of them through the rest. The registry has no way to read the setting back, so octoops goes by state alone. Taking `mfa` out of the config leaves the registry as it is.
+
+An unknown key in the `npm` block is reported with a warning, like one on a repo.
 
 This also works on **archived** repos: the npm registry is independent of GitHub's archive flag, so octoops still reconciles deprecation (and other npm state) even when `archived: true` — deprecating a package while archiving its repo is the common case.
 
