@@ -1226,6 +1226,7 @@ function validateConfig(config, warn = warnStderr) {
       warn('"renamedFrom" on repo "' + raw.name + '" equals its name and is ignored')
     }
     validateSecretNames(raw.secrets, 'repo "' + (raw.name || '?') + '"')
+    for (const n of npmEntriesOf(raw)) validateNpmDeprecated(n, 'repo "' + (raw.name || '?') + '"')
     if (raw.deleted !== true) {
       // apps can arrive through a defaults pack, so check the merged entry
       const where = 'repo "' + (raw.name || '?') + '"'
@@ -3842,21 +3843,30 @@ async function ensureNpmPackage(pkg, dry) {
 async function reconcileNpmBlock(org, repo, prev, dry, done) {
   if (!repo.npm && !prev.npm) return
   const trust = { ...(prev.npmTrust || {}) }
+  let recorded = repo.npm
   if (changed(repo.npm, prev.npm)) {
     const npms = Array.isArray(repo.npm) ? repo.npm : repo.npm ? [repo.npm] : []
     const prevs = Array.isArray(prev.npm) ? prev.npm : prev.npm ? [prev.npm] : []
     // each package is its own unit of change: editing one entry of the list
     // must not drag every other package through npm auth, maintainers and
     // trust again
+    const applied = []
     for (const npm of npms) {
       const pkg = npmPackageName(npm, repo.name)
       const was = prevs.find((p) => npmPackageName(p, repo.name) === pkg)
-      if (was && !changed(npm, was)) continue
-      await reconcileNpm(org, repo.name, npm, dry, trust)
+      if (was && !changed(npm, was)) {
+        applied.push(npm)
+        continue
+      }
+      applied.push((await reconcileNpm(org, repo.name, npm, was || null, dry, trust)).applied)
     }
+    // a deprecation that could not land yet is left out of what gets recorded,
+    // so the entry still differs from state and the next apply tries again
+    recorded = Array.isArray(repo.npm) ? applied : applied[0]
     // a package gone from the config keeps nothing an apply set up for it.
-    // maintainers and deprecation stay, a package needs an owner and the
-    // deprecation was meant for its users, but publishers are revoked
+    // maintainers and package-level deprecation stay, a package needs an owner
+    // and the deprecation was meant for its users, but publishers are revoked.
+    // version deprecations an apply set up are cleared when the block changes
     const desired = new Set(npms.map((n) => npmPackageName(n, repo.name)))
     for (const was of prevs) {
       const pkg = npmPackageName(was, repo.name)
@@ -3867,7 +3877,7 @@ async function reconcileNpmBlock(org, repo, prev, dry, done) {
   // record only after the work succeeded — if reconcileNpm threw (e.g. npm
   // publish failed because not logged in) we leave state unchanged so the
   // next apply retries instead of assuming it's done
-  done.npm = repo.npm
+  done.npm = recorded
   if (!dry && changed(trust, prev.npmTrust || {})) done.npmTrust = trust
 }
 
@@ -3900,16 +3910,23 @@ function desiredTrustedPublishers(org, repoName, tp, registry = 'npm') {
   return desired
 }
 
-async function reconcileNpm(org, repoName, npm, dry, trust) {
+async function reconcileNpm(org, repoName, npm, was, dry, trust) {
   const pkg = npmPackageName(npm, repoName)
   const tp = npm.trustedPublishing
   // publishers still in state were set up by an earlier apply. the entry no
   // longer declaring them means they are to go, not to be forgotten
   const dropping = !tp && trust[pkg] !== undefined
 
-  if (!tp && !npm.maintainers && npm.deprecated === undefined && !dropping) return true
+  // a previous entry that declared deprecations is the clear-set for them
+  const clearing = was && was.deprecated !== undefined
+  if (!tp && !npm.maintainers && npm.deprecated === undefined && !clearing && !dropping) {
+    return { ok: true, applied: npm }
+  }
 
-  // a package that only loses its publishers exists already, no need to look
+  // a package that only loses its publishers exists already, no need to look.
+  // a clear-only run does not create the package either: if it is not on npm
+  // there is nothing to clear, the registry check says so and the next apply
+  // syncs after a real publish
   if (!dropping || npm.maintainers || npm.deprecated !== undefined) await ensureNpmPackage(pkg, dry)
 
   let ok = true
@@ -3917,18 +3934,27 @@ async function reconcileNpm(org, repoName, npm, dry, trust) {
     ok = await reconcileNpmMaintainers(pkg, npm.maintainers, dry)
   }
 
-  if (npm.deprecated !== undefined) {
-    await reconcileNpmDeprecation(pkg, npm.deprecated, dry)
+  // the previous entry is the clear-set for version deprecations, so the
+  // reconcile runs on a previous state even when this one declares nothing
+  let applied = npm
+  if (npm.deprecated !== undefined || clearing) {
+    const pending = await reconcileNpmDeprecation(
+      pkg,
+      normalizeNpmDeprecation(npm.deprecated),
+      clearing ? normalizeNpmDeprecation(was.deprecated) : null,
+      dry
+    )
+    applied = appliedNpm(npm, was, pending)
   }
 
   if (dropping) await dropTrustedPublishers(pkg, `${org}/${repoName}`, trust, dry)
-  if (!tp) return ok
+  if (!tp) return { ok, applied }
 
   const desired = desiredTrustedPublishers(org, repoName, tp)
 
   if (dry) {
     for (const d of desired) print(dry, 'npm-trust', pkg, `${d.repository} via ${d.file}`)
-    return ok
+    return { ok, applied }
   }
 
   const { current, created } = await syncTrustedPublishers(
@@ -3940,7 +3966,7 @@ async function reconcileNpm(org, repoName, npm, dry, trust) {
   // a new publisher starts npm's publish-or-expire clock, see reconcileNpmTrust
   trust[pkg] = trackPublishers(current, trust[pkg], created)
 
-  return ok
+  return { ok, applied }
 }
 
 // revokes every publisher bound to this repo and drops the package from state.
@@ -4059,11 +4085,12 @@ async function reconcileNpmTrust(org, repo, prev, dry, done, opts) {
       if (!desired.length) continue
       const pkg = npmPackageName(npm, repo.name)
       tracked.add(pkg)
-      // a deprecated package is not expected to release again, so a publisher
-      // that never published is left to expire rather than recreated every
-      // window. its entry and clock stay, lifting the deprecation makes it
-      // overdue at once and the next apply judges it
-      if (npm.deprecated) continue
+      // a package deprecated at the package level (not just some versions)
+      // is not expected to release again, so a publisher that never published
+      // is left to expire rather than recreated every window. its entry and
+      // clock stay, lifting the deprecation makes it overdue at once and the
+      // next apply judges it
+      if (normalizeNpmDeprecation(npm.deprecated).others) continue
       await checkNpmTrust(pkg, `${org}/${repo.name}`, desired, trust, dry, opts)
     }
   }
@@ -4204,11 +4231,12 @@ function listNpmTrust(config, statePath) {
       const desired = desiredTrustedPublishers(config.org, repo.name, npm.trustedPublishing)
       if (!desired.length) continue
       const pkg = npmPackageName(npm, repo.name)
+      const dep = normalizeNpmDeprecation(npm.deprecated)
       for (const e of trackPublishers(desired, trust[pkg])) {
         const entry = {
           repo: config.org + '/' + repo.name,
           archived: repo.archived === true,
-          deprecated: !!npm.deprecated,
+          deprecated: !!dep.others,
           pkg,
           ...e
         }
@@ -4452,30 +4480,186 @@ async function reconcileNpmMaintainers(pkg, desired, dry) {
   return ok
 }
 
-async function reconcileNpmDeprecation(pkg, deprecated, dry) {
-  const message = deprecated === true ? 'This package is deprecated' : deprecated || ''
-
-  const res = await npm(['view', pkg, 'deprecated', '--json'], { allowFailure: true })
-  if (res.code !== 0) {
-    if (/404|E404|not found/i.test(res.stderr)) {
-      print(dry, 'skip-deprecate', pkg, 'package not on npm yet, will sync on next apply')
-      return
+// "deprecated" takes three shapes: a string (package-level message), true
+// (package-level, default message), false/"" (clear package-level). an object
+// manages versions as well, each explicit version gets its own message. the
+// registry does not track which versions an apply set up, so the clear-set is
+// the previous state's declaration: a version is cleared only when an apply
+// declared it and this one no longer does
+function normalizeNpmDeprecation(deprecated) {
+  // others: undefined leaves the package-level message alone, "" clears it,
+  // anything else is the message to set
+  if (deprecated === undefined || deprecated === null) return { others: undefined, versions: {} }
+  if (typeof deprecated === 'string') return { others: deprecated, versions: {} }
+  if (typeof deprecated === 'boolean')
+    return { others: deprecated ? 'This package is deprecated' : '', versions: {} }
+  const out = { others: undefined, versions: {} }
+  if (deprecated.others === true) out.others = 'This package is deprecated'
+  else if (deprecated.others === false) out.others = ''
+  else if (deprecated.others !== undefined && deprecated.others !== null)
+    out.others = String(deprecated.others)
+  for (const v of deprecated.versions || []) {
+    if (typeof v === 'string') {
+      out.versions[v] = 'This package is deprecated'
+      continue
     }
-    throw new Error('npm view ' + pkg + ' deprecated failed: ' + res.stderr)
+    out.versions[v.version] =
+      v.message === undefined ? 'This package is deprecated' : String(v.message)
+  }
+  return out
+}
+
+// the npm entries of a raw repo or defaults pack, an entry missing entirely is
+// nothing to check
+function npmEntriesOf(entry) {
+  if (!entry || !entry.npm) return []
+  return Array.isArray(entry.npm) ? entry.npm : [entry.npm]
+}
+
+function validateNpmDeprecated(npm, where) {
+  const d = npm.deprecated
+  if (d === undefined) return
+  if (typeof d === 'string' || typeof d === 'boolean') return
+  if (typeof d !== 'object' || Array.isArray(d))
+    throw new Error(
+      'npm.deprecated on ' + where + ' must be a string, a boolean, or { "others", "versions" }'
+    )
+  if (
+    d.others !== undefined &&
+    d.others !== null &&
+    typeof d.others !== 'boolean' &&
+    typeof d.others !== 'string'
+  )
+    throw new Error(
+      'npm.deprecated.others on ' + where + ' must be a message string, true, or false'
+    )
+  for (const k of Object.keys(d)) {
+    if (k !== 'others' && k !== 'versions')
+      throw new Error(
+        'unknown property "' +
+          k +
+          '" in npm.deprecated on ' +
+          where +
+          ', it takes "others" and "versions"'
+      )
+  }
+  if (d.versions !== undefined && !Array.isArray(d.versions))
+    throw new Error('npm.deprecated.versions on ' + where + ' must be a list of versions')
+  for (const v of d.versions || []) {
+    if (typeof v === 'string') continue
+    if (!v || typeof v !== 'object' || typeof v.version !== 'string' || !v.version)
+      throw new Error(
+        'npm.deprecated.versions on ' +
+          where +
+          ' must be version strings or { "version", "message" }'
+      )
+    if (v.message !== undefined && typeof v.message !== 'string')
+      throw new Error(
+        'npm.deprecated.versions message on ' + where + ' must be a string, "" clears that version'
+      )
+  }
+}
+
+// returns the declared versions that could not be synced yet, or null when the
+// registry could not be read and nothing was synced at all
+async function reconcileNpmDeprecation(pkg, dep, was, dry) {
+  let packument
+  try {
+    packument = await fetchPackument(pkg)
+  } catch (err) {
+    // a registry hiccup is no reason to guess, the next apply looks again
+    print(dry, 'deprecate-skip', pkg, 'could not read registry: ' + err.message)
+    return null
+  }
+  if (!packument) {
+    print(dry, 'skip-deprecate', pkg, 'package not on npm yet, will sync on next apply')
+    return null
   }
 
-  let current = ''
-  if (res.stdout) {
-    const parsed = JSON.parse(res.stdout)
-    if (typeof parsed === 'string') current = parsed
+  // the registry has no package-level deprecation, only a message per version.
+  // kept up to date as commands run, each check sees what the last one did
+  const current = {}
+  for (const [version, data] of Object.entries(packument.versions || {})) {
+    current[version] = (data && data.deprecated) || ''
+  }
+  const published = (version) => Object.prototype.hasOwnProperty.call(current, version)
+  const declared = (version) => Object.prototype.hasOwnProperty.call(dep.versions, version)
+
+  // package-level: undefined leaves it alone, "" clears it. it is in place when
+  // every version without a message of its own carries it. the command writes
+  // all versions, the declared ones get theirs back below
+  if (dep.others !== undefined) {
+    const stale = Object.keys(current).some((v) => !declared(v) && current[v] !== dep.others)
+    if (stale) {
+      print(
+        dry,
+        dep.others ? 'npm-deprecate' : 'npm-undeprecate',
+        pkg,
+        dep.others || 'clear deprecation'
+      )
+      if (!dry) await npm(['deprecate', pkg, dep.others])
+      for (const version of Object.keys(current)) current[version] = dep.others
+    }
   }
 
-  if (current === message) return
+  const pending = []
+  for (const version of Object.keys(dep.versions)) {
+    const message = dep.versions[version]
+    if (!published(version)) {
+      print(
+        dry,
+        'deprecate-skip',
+        pkg + '@' + version,
+        'not published yet, will sync on next apply'
+      )
+      pending.push(version)
+      continue
+    }
+    if (current[version] === message) continue
+    print(
+      dry,
+      message ? 'npm-deprecate' : 'npm-undeprecate',
+      pkg + '@' + version,
+      message || 'clear deprecation'
+    )
+    if (!dry) await npm(['deprecate', pkg + '@' + version, message])
+    current[version] = message
+  }
 
-  print(dry, message ? 'npm-deprecate' : 'npm-undeprecate', pkg, message || 'clear deprecation')
-  if (dry) return
+  // a version a previous apply declared that this one no longer does is ours
+  // to clear; everything else stays, matching the keep-what-you-did-not-set
+  // rule maintainers and publishers follow. with a package-level setting the
+  // version just follows that instead, clearing it would punch a hole in it
+  if (was && dep.others === undefined) {
+    for (const version of Object.keys(was.versions)) {
+      if (declared(version) || !published(version) || !current[version]) continue
+      print(dry, 'npm-undeprecate', pkg + '@' + version, 'no longer declared, clear deprecation')
+      if (!dry) await npm(['deprecate', pkg + '@' + version, ''])
+      current[version] = ''
+    }
+  }
 
-  await run('npm', ['deprecate', pkg, message], { interactive: true })
+  return pending
+}
+
+// the entry as state may record it. deprecations that did not land are left
+// as they were, so the entry keeps differing from the config until they do
+function appliedNpm(entry, was, pending) {
+  if (pending && !pending.length) return entry
+  const out = { ...entry }
+  if (pending) {
+    out.deprecated = {
+      ...entry.deprecated,
+      versions: entry.deprecated.versions.filter(
+        (v) => !pending.includes(typeof v === 'string' ? v : v.version)
+      )
+    }
+  } else if (was && was.deprecated !== undefined) {
+    out.deprecated = was.deprecated
+  } else {
+    delete out.deprecated
+  }
+  return out
 }
 
 // PyPI has no token/CLI to create trusted publishers (browser-only), so octoops

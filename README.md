@@ -995,7 +995,25 @@ You can also deprecate a package:
 }
 ```
 
-- `deprecated` — optional. A string is used as the deprecation message. `true` uses the default message `This package is deprecated`. `false` (or `""`) clears an existing deprecation. Omit it entirely to leave deprecation unmanaged.
+- `deprecated` — optional. A string is used as the package-level deprecation message. `true` uses the default message `This package is deprecated`. `false` (or `""`) clears an existing deprecation. Omit it entirely to leave deprecation unmanaged.
+
+To manage deprecation per version, use an object. `versions` is a list of version strings or `{ "version", "message" }` entries, and `others` covers every version not listed there (same forms as above). Omit `others` to leave the unlisted versions alone; `false` actively clears them. A plain `"deprecated": "message"` is shorthand for `{ "others": "message" }`:
+
+```json
+"npm": {
+  "package": "my-module",
+  "deprecated": {
+    "others": false,
+    "versions": [
+      "1.0.0",
+      { "version": "2.0.0", "message": "Use v3 API" },
+      { "version": "2.1.0", "message": "" }
+    ]
+  }
+}
+```
+
+A bare version string (or a missing `message`) sets the default message; `"message": ""` clears that version's deprecation. A version that isn't published yet is skipped with a `deprecate-skip` line and picked up on the next apply. A version a previous apply declared that this one no longer does is cleared (`npm-undeprecate`, "no longer declared"); deprecations set by maintainers or publishers are never touched.
 
 Like every other field, deprecation is only reconciled when the `npm` block differs from recorded state — a matching re-apply does nothing. When it does run, octoops checks the live registry first and only calls `npm deprecate` if the current message actually differs (`npm-deprecate` / `npm-undeprecate` log lines). If the package isn't on npm yet you'll see a `skip-deprecate` line.
 
