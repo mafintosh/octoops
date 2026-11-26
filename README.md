@@ -62,11 +62,7 @@ Apply a manifest that orchestrates multiple configs in one shot:
 ```json
 // org-manifest.json
 {
-  "includes": [
-    "./team-a/config.json",
-    "./team-b/config.json",
-    "./tooling/config.json"
-  ]
+  "includes": ["./team-a/config.json", "./team-b/config.json", "./tooling/config.json"]
 }
 ```
 
@@ -182,7 +178,7 @@ A repo entry can also carry its own `presets` map. Those presets are only visibl
 ```
 
 - A local preset shadows a root preset of the same name, so `$reviewers` is `api-owners` inside `api` and `release` everywhere else
-- Scoping is dynamic: the shadow also applies to refs reached *through* a root preset or a `defaults` entry. If a shared `code-review` ruleset reads `$review`, a repo that sets `"presets": { "review": "data-structures" }` gets that team in the ruleset without restating the ruleset, whether it lists `"$code-review"` itself or inherits it via `defaults`. Every ref that resolves to `review` inside that repo switches, so check what else in the shared presets reads it
+- Scoping is dynamic: the shadow also applies to refs reached _through_ a root preset or a `defaults` entry. If a shared `code-review` ruleset reads `$review`, a repo that sets `"presets": { "review": "data-structures" }` gets that team in the ruleset without restating the ruleset, whether it lists `"$code-review"` itself or inherits it via `defaults`. Every ref that resolves to `review` inside that repo switches, so check what else in the shared presets reads it
 - Local presets can reference root presets and other local presets, and the same spread and fan-out rules apply. Cycles are an error
 - Other repos and the root config cannot see a repo's local presets — referencing one from elsewhere is an unknown-preset error
 - Local presets work even when the config has no root `presets` map
@@ -212,8 +208,8 @@ Top-level repo fields for basic settings:
 - `actionsAccess` — `"none"` | `"organization"` | `"enterprise"`. Controls which other repos' GitHub Actions workflows can access this repo's actions and reusable workflows (Settings → Actions → General → Access). Only relevant for private repos.
 - `forkPrContributorApproval` — `"all_external_contributors"` | `"first_time_contributors"` | `"first_time_contributors_new_to_github"`. Controls who must wait for approval before GitHub Actions runs on fork pull requests (Settings → Actions → General → Fork pull request workflows from outside collaborators).
 - `template` — overloaded by type:
-  - `"owner/repo"` — create the repo *from* a template repo. Only used at create time. Mutually exclusive with `init` (templates already have content).
-  - `true` / `false` — mark this repo *as* a template (so others can "Use this template"). Settable on existing repos via the settings PATCH.
+  - `"owner/repo"` — create the repo _from_ a template repo. Only used at create time. Mutually exclusive with `init` (templates already have content).
+  - `true` / `false` — mark this repo _as_ a template (so others can "Use this template"). Settable on existing repos via the settings PATCH.
 - `merging` — `{ squashOnly, deleteBranchOnMerge, squashMessage }`
   - `squashOnly: true` allows only squash merging; `squashOnly: false` allows merge commits and rebase merging and turns squash merging **off**
   - `squashMessage` — the default squash commit message. As in the UI, it's a sub-option of squash merging: setting it turns squash merging on (other merge methods are left as they are), and combining it with `squashOnly: false` is an error. The values match the four choices under "Allow squash merging" in Settings → General → Pull Requests:
@@ -238,9 +234,7 @@ A config file can `extends` one or more other files. This lets multiple teams sh
     "base": { "private": true, "wiki": false }
   },
   "presets": {
-    "default-rules": [
-      { "name": "main", "preventForcePush": true, "requirePR": { "approvals": 1 } }
-    ]
+    "default-rules": [{ "name": "main", "preventForcePush": true, "requirePR": { "approvals": 1 } }]
   }
 }
 ```
@@ -558,9 +552,7 @@ Declare the names of the Actions secrets a repo or environment should have. Valu
 {
   "name": "my-repo",
   "secrets": ["NPM_TOKEN", "SLACK_WEBHOOK"],
-  "environments": [
-    { "name": "production", "secrets": ["NPM_TOKEN"] }
-  ]
+  "environments": [{ "name": "production", "secrets": ["NPM_TOKEN"] }]
 }
 ```
 
@@ -753,7 +745,12 @@ GitHub flags this API as beta — the parameter shape may change on their side.
       "merging": "$oss-merging",
       "rulesets": "$oss-protection"
     },
-    { "name": "module-c", "private": false, "merging": "$oss-merging", "rulesets": "$oss-protection" }
+    {
+      "name": "module-c",
+      "private": false,
+      "merging": "$oss-merging",
+      "rulesets": "$oss-protection"
+    }
   ]
 }
 ```
@@ -902,7 +899,10 @@ Sets up npm trusted publishing so GitHub Actions can publish via OIDC without np
 
 ```json
 {
-  "npm": { "scope": "@my-org", "trustedPublishing": { "workflow": "publish.yml", "environment": "npm" } }
+  "npm": {
+    "scope": "@my-org",
+    "trustedPublishing": { "workflow": "publish.yml", "environment": "npm" }
+  }
 }
 ```
 

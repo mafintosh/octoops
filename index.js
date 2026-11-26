@@ -11,7 +11,19 @@ const PERMISSIONS = {
   admin: 'admin'
 }
 
-module.exports = { apply, importOrg, seed, filter, resync, lint, preview, loadConfig, renameRepo, expandIncludes, listNpmTrust }
+module.exports = {
+  apply,
+  importOrg,
+  seed,
+  filter,
+  resync,
+  lint,
+  preview,
+  loadConfig,
+  renameRepo,
+  expandIncludes,
+  listNpmTrust
+}
 
 const MERGE_QUEUE_METHODS = new Set(['MERGE', 'SQUASH', 'REBASE'])
 const MERGE_QUEUE_GROUPINGS = new Set(['ALLGREEN', 'HEADGREEN'])
@@ -42,11 +54,18 @@ async function importOrg(org, opts = {}) {
     try {
       const orgData = JSON.parse(await gh(['api', `orgs/${org}`]))
       const sec = {}
-      if (orgData.advanced_security_enabled_for_new_repositories !== undefined) sec.advancedSecurity = orgData.advanced_security_enabled_for_new_repositories
-      if (orgData.secret_scanning_enabled_for_new_repositories !== undefined) sec.secretScanning = orgData.secret_scanning_enabled_for_new_repositories
-      if (orgData.secret_scanning_push_protection_enabled_for_new_repositories !== undefined) sec.secretScanningPushProtection = orgData.secret_scanning_push_protection_enabled_for_new_repositories
-      if (orgData.dependabot_alerts_enabled_for_new_repositories !== undefined) sec.dependabotAlerts = orgData.dependabot_alerts_enabled_for_new_repositories
-      if (orgData.dependabot_security_updates_enabled_for_new_repositories !== undefined) sec.dependabotSecurityUpdates = orgData.dependabot_security_updates_enabled_for_new_repositories
+      if (orgData.advanced_security_enabled_for_new_repositories !== undefined)
+        sec.advancedSecurity = orgData.advanced_security_enabled_for_new_repositories
+      if (orgData.secret_scanning_enabled_for_new_repositories !== undefined)
+        sec.secretScanning = orgData.secret_scanning_enabled_for_new_repositories
+      if (orgData.secret_scanning_push_protection_enabled_for_new_repositories !== undefined)
+        sec.secretScanningPushProtection =
+          orgData.secret_scanning_push_protection_enabled_for_new_repositories
+      if (orgData.dependabot_alerts_enabled_for_new_repositories !== undefined)
+        sec.dependabotAlerts = orgData.dependabot_alerts_enabled_for_new_repositories
+      if (orgData.dependabot_security_updates_enabled_for_new_repositories !== undefined)
+        sec.dependabotSecurityUpdates =
+          orgData.dependabot_security_updates_enabled_for_new_repositories
       if (Object.keys(sec).length) config.security = sec
     } catch {}
   }
@@ -101,7 +120,9 @@ async function importOrgSecrets(org) {
 
 async function listSecretNames(args) {
   try {
-    return JSON.parse(await gh(['secret', 'list', ...args, '--json', 'name'])).map((s) => s.name).sort()
+    return JSON.parse(await gh(['secret', 'list', ...args, '--json', 'name']))
+      .map((s) => s.name)
+      .sort()
   } catch {
     return []
   }
@@ -165,7 +186,8 @@ async function importRepo(org, name) {
 
   try {
     const access = JSON.parse(await gh(['api', `repos/${org}/${name}/actions/permissions/access`]))
-    if (access.access_level && access.access_level !== 'none') entry.actionsAccess = access.access_level
+    if (access.access_level && access.access_level !== 'none')
+      entry.actionsAccess = access.access_level
   } catch {}
 
   try {
@@ -173,8 +195,13 @@ async function importRepo(org, name) {
   } catch {}
 
   try {
-    const forkPr = JSON.parse(await gh(['api', `repos/${org}/${name}/actions/permissions/fork-pr-contributor-approval`]))
-    if (forkPr.approval_policy && forkPr.approval_policy !== 'first_time_contributors_new_to_github') {
+    const forkPr = JSON.parse(
+      await gh(['api', `repos/${org}/${name}/actions/permissions/fork-pr-contributor-approval`])
+    )
+    if (
+      forkPr.approval_policy &&
+      forkPr.approval_policy !== 'first_time_contributors_new_to_github'
+    ) {
       entry.forkPrContributorApproval = forkPr.approval_policy
     }
   } catch {}
@@ -184,9 +211,12 @@ async function importRepo(org, name) {
     const sec = {}
     if (sa.advanced_security) sec.advancedSecurity = sa.advanced_security.status === 'enabled'
     if (sa.secret_scanning) sec.secretScanning = sa.secret_scanning.status === 'enabled'
-    if (sa.secret_scanning_push_protection) sec.secretScanningPushProtection = sa.secret_scanning_push_protection.status === 'enabled'
-    if (sa.secret_scanning_validity_checks) sec.secretScanningValidityChecks = sa.secret_scanning_validity_checks.status === 'enabled'
-    if (sa.dependabot_security_updates) sec.dependabotSecurityUpdates = sa.dependabot_security_updates.status === 'enabled'
+    if (sa.secret_scanning_push_protection)
+      sec.secretScanningPushProtection = sa.secret_scanning_push_protection.status === 'enabled'
+    if (sa.secret_scanning_validity_checks)
+      sec.secretScanningValidityChecks = sa.secret_scanning_validity_checks.status === 'enabled'
+    if (sa.dependabot_security_updates)
+      sec.dependabotSecurityUpdates = sa.dependabot_security_updates.status === 'enabled'
     if (Object.keys(sec).length) entry.security = sec
   }
 
@@ -447,7 +477,8 @@ function seed(config, opts = {}) {
     if (existing.npmTrust) entry.npmTrust = existing.npmTrust
     if (repo.secrets) entry.secrets = normalizeSecretNames(repo.secrets)
     const envSecrets = {}
-    for (const env of repo.environments || []) if (env.secrets) envSecrets[env.name] = normalizeSecretNames(env.secrets)
+    for (const env of repo.environments || [])
+      if (env.secrets) envSecrets[env.name] = normalizeSecretNames(env.secrets)
     if (Object.keys(envSecrets).length) entry.envSecrets = envSecrets
     if (raw.renamedFrom) entry.renamedFrom = raw.renamedFrom
     if (repo.archived) entry.archived = true
@@ -463,7 +494,8 @@ function seed(config, opts = {}) {
     if (repo.discussions !== undefined) entry.discussions = repo.discussions
     if (typeof repo.template === 'boolean') entry.template = repo.template
     if (repo.actionsAccess !== undefined) entry.actionsAccess = repo.actionsAccess
-    if (repo.forkPrContributorApproval !== undefined) entry.forkPrContributorApproval = repo.forkPrContributorApproval
+    if (repo.forkPrContributorApproval !== undefined)
+      entry.forkPrContributorApproval = repo.forkPrContributorApproval
     if (repo.pages !== undefined) entry.pages = repo.pages
     if (repo.security) entry.security = repo.security
     if (repo.topics) entry.topics = repo.topics
@@ -487,24 +519,50 @@ function seed(config, opts = {}) {
   if (config.orgSecrets) state.orgSecrets = normalizeOrgSecrets(config.orgSecrets)
 
   if (opts.statePath) saveState(opts.statePath, state)
-  console.log('seeded state for ' + (config.teams ? config.teams.length + ' teams and ' : '') + (config.repos || []).length + ' repos')
+  console.log(
+    'seeded state for ' +
+      (config.teams ? config.teams.length + ' teams and ' : '') +
+      (config.repos || []).length +
+      ' repos'
+  )
 }
 
 async function renameRepo(configPath, from, to, opts = {}) {
   const resolvedConfigPath = path.resolve(configPath)
   const raw = JSON.parse(fs.readFileSync(resolvedConfigPath, 'utf-8'))
   const org = raw.org
-  if (!org) throw new Error('config ' + resolvedConfigPath + ' has no "org" field; rename must be run against the file that declares the org and the repo')
+  if (!org)
+    throw new Error(
+      'config ' +
+        resolvedConfigPath +
+        ' has no "org" field; rename must be run against the file that declares the org and the repo'
+    )
 
   // the config may already carry the new name (someone edited it before running rename)
   const repos = raw.repos || []
   const fromIdx = repos.findIndex((r) => r.name === from)
   const toIdx = repos.findIndex((r) => r.name === to)
   if (fromIdx === -1 && toIdx === -1) {
-    throw new Error('neither "' + from + '" nor "' + to + '" found in ' + resolvedConfigPath + ' (rename must run against the file that contains the repo entry)')
+    throw new Error(
+      'neither "' +
+        from +
+        '" nor "' +
+        to +
+        '" found in ' +
+        resolvedConfigPath +
+        ' (rename must run against the file that contains the repo entry)'
+    )
   }
   if (fromIdx !== -1 && toIdx !== -1) {
-    throw new Error('both "' + from + '" and "' + to + '" exist in ' + resolvedConfigPath + ', keep only one of them')
+    throw new Error(
+      'both "' +
+        from +
+        '" and "' +
+        to +
+        '" exist in ' +
+        resolvedConfigPath +
+        ', keep only one of them'
+    )
   }
 
   const statePath = opts.statePath || resolvedConfigPath.replace(/\.json$/, '.state.json')
@@ -550,9 +608,11 @@ async function resync(config, opts = {}) {
 
   const fresh = await importOrg(config.org, importOpts)
 
-  if (config.admins && fresh.admins) fresh.admins = fresh.admins.filter((u) => config.admins.includes(u))
+  if (config.admins && fresh.admins)
+    fresh.admins = fresh.admins.filter((u) => config.admins.includes(u))
   else if (!config.admins) delete fresh.admins
-  if (config.members && fresh.members) fresh.members = fresh.members.filter((u) => config.members.includes(u))
+  if (config.members && fresh.members)
+    fresh.members = fresh.members.filter((u) => config.members.includes(u))
   else if (!config.members) delete fresh.members
 
   if (config.teams && fresh.teams) {
@@ -561,7 +621,8 @@ async function resync(config, opts = {}) {
   }
 
   if (config.orgSecrets && fresh.orgSecrets) {
-    for (const name of Object.keys(fresh.orgSecrets)) if (!(name in config.orgSecrets)) delete fresh.orgSecrets[name]
+    for (const name of Object.keys(fresh.orgSecrets))
+      if (!(name in config.orgSecrets)) delete fresh.orgSecrets[name]
   }
 
   // tombstones for repos still marked deleted survive the resync, GitHub has
@@ -592,7 +653,13 @@ async function apply(config, opts = {}) {
   const dry = opts.dry === true
   if (config.enterprise) opts = { ...opts, enterprise: true }
   // values are prompted once per name per apply and reused across every target
-  opts = { ...opts, secretValues: new Map(), invalidate: new Set(opts.invalidate || []), invalidated: new Set(), installations: new Map() }
+  opts = {
+    ...opts,
+    secretValues: new Map(),
+    invalidate: new Set(opts.invalidate || []),
+    invalidated: new Set(),
+    installations: new Map()
+  }
   validateConfig(config)
   const state = loadState(opts.statePath)
 
@@ -610,12 +677,27 @@ async function apply(config, opts = {}) {
 
   try {
     const adminsChanged = (config.admins || state.admins) && changed(config.admins, state.admins)
-    const membersChanged = (config.members || state.members) && changed(config.members, state.members)
+    const membersChanged =
+      (config.members || state.members) && changed(config.members, state.members)
 
     if (adminsChanged || membersChanged) {
       const allDesired = new Set([...(config.admins || []), ...(config.members || [])])
-      await reconcileOrgMembers(config.org, config.admins || [], state.admins, 'admin', allDesired, dry)
-      await reconcileOrgMembers(config.org, config.members || [], state.members, 'member', allDesired, dry)
+      await reconcileOrgMembers(
+        config.org,
+        config.admins || [],
+        state.admins,
+        'admin',
+        allDesired,
+        dry
+      )
+      await reconcileOrgMembers(
+        config.org,
+        config.members || [],
+        state.members,
+        'member',
+        allDesired,
+        dry
+      )
       if (!dry) {
         state.admins = config.admins
         state.members = config.members
@@ -633,9 +715,15 @@ async function apply(config, opts = {}) {
 
     if (config.runnerGroups || state.runnerGroups) {
       const desiredNormalized = {}
-      for (const n of Object.keys(config.runnerGroups || {})) desiredNormalized[n] = normalizeRunnerGroup(config.runnerGroups[n])
+      for (const n of Object.keys(config.runnerGroups || {}))
+        desiredNormalized[n] = normalizeRunnerGroup(config.runnerGroups[n])
       if (changed(desiredNormalized, state.runnerGroups || {})) {
-        const applied = await reconcileRunnerGroups(config.org, config.runnerGroups || {}, state.runnerGroups || {}, dry)
+        const applied = await reconcileRunnerGroups(
+          config.org,
+          config.runnerGroups || {},
+          state.runnerGroups || {},
+          dry
+        )
         if (!dry) {
           state.runnerGroups = applied
           if (opts.statePath) saveState(opts.statePath, state)
@@ -645,9 +733,15 @@ async function apply(config, opts = {}) {
 
     if (config.hostedRunners || state.hostedRunners) {
       const desiredNormalized = {}
-      for (const n of Object.keys(config.hostedRunners || {})) desiredNormalized[n] = normalizeHostedRunner(config.hostedRunners[n])
+      for (const n of Object.keys(config.hostedRunners || {}))
+        desiredNormalized[n] = normalizeHostedRunner(config.hostedRunners[n])
       if (changed(desiredNormalized, state.hostedRunners || {})) {
-        const applied = await reconcileHostedRunners(config.org, config.hostedRunners || {}, state.hostedRunners || {}, dry)
+        const applied = await reconcileHostedRunners(
+          config.org,
+          config.hostedRunners || {},
+          state.hostedRunners || {},
+          dry
+        )
         if (!dry) {
           state.hostedRunners = applied
           if (opts.statePath) saveState(opts.statePath, state)
@@ -773,7 +867,8 @@ async function apply(config, opts = {}) {
     }
 
     for (const name of opts.invalidate) {
-      if (!opts.invalidated.has(name)) console.error('warning: --invalidate ' + name + ' matched no secret in this config')
+      if (!opts.invalidated.has(name))
+        console.error('warning: --invalidate ' + name + ' matched no secret in this config')
     }
 
     // after repos — an app can reference a repo created earlier in this apply
@@ -864,7 +959,10 @@ function expandPresets(config) {
     if (!raw.presets) return resolveDefaults(expand(raw, at, root, new Set()), defaults)
     const local = createScope(raw.presets, root, at + '.presets')
     const { presets, ...rest } = raw
-    return resolveDefaults(expand(rest, at, local, new Set()), expand(config.defaults, 'defaults', local, new Set()))
+    return resolveDefaults(
+      expand(rest, at, local, new Set()),
+      expand(config.defaults, 'defaults', local, new Set())
+    )
   }
 
   function has(name, scope) {
@@ -898,7 +996,9 @@ function expandPresets(config) {
       if (!match) return value
       const name = match[1]
       if (!has(name, scope)) {
-        throw new Error('unknown preset "' + name + '" at ' + at + suggest(name, names(scope), null))
+        throw new Error(
+          'unknown preset "' + name + '" at ' + at + suggest(name, names(scope), null)
+        )
       }
       return lookup(name, scope, seen)
     }
@@ -907,7 +1007,8 @@ function expandPresets(config) {
       const list = []
       for (let i = 0; i < value.length; i++) {
         const item = expand(value[i], at + '[' + i + ']', scope, seen)
-        const spread = typeof value[i] === 'string' && PRESET_REF.test(value[i]) && Array.isArray(item)
+        const spread =
+          typeof value[i] === 'string' && PRESET_REF.test(value[i]) && Array.isArray(item)
         if (spread) list.push(...item)
         else list.push(...fanout(value[i], item, at + '[' + i + ']'))
       }
@@ -916,7 +1017,8 @@ function expandPresets(config) {
 
     if (value && typeof value === 'object') {
       const obj = {}
-      for (const key of Object.keys(value)) obj[key] = expand(value[key], at + '.' + key, scope, seen)
+      for (const key of Object.keys(value))
+        obj[key] = expand(value[key], at + '.' + key, scope, seen)
       return obj
     }
 
@@ -929,7 +1031,8 @@ function expandPresets(config) {
     let key = null
     for (const k of Object.keys(raw)) {
       if (!FANOUT_KEYS.has(k)) continue
-      if (typeof raw[k] !== 'string' || !PRESET_REF.test(raw[k]) || !Array.isArray(item[k])) continue
+      if (typeof raw[k] !== 'string' || !PRESET_REF.test(raw[k]) || !Array.isArray(item[k]))
+        continue
       if (key) throw new Error('multiple fan-out fields "' + key + '" and "' + k + '" at ' + at)
       key = k
     }
@@ -1002,29 +1105,70 @@ function resolveDefaultsEntry(name, defaults, seen) {
 }
 
 const ROOT_KEYS = new Set([
-  'org', 'enterprise', 'extends', 'includes',
-  'presets', 'defaults',
-  'repos', 'teams', 'admins', 'members',
-  'security', 'runnerGroups', 'hostedRunners', 'pruneOfflineRunners',
-  'apps', 'orgSecrets'
+  'org',
+  'enterprise',
+  'extends',
+  'includes',
+  'presets',
+  'defaults',
+  'repos',
+  'teams',
+  'admins',
+  'members',
+  'security',
+  'runnerGroups',
+  'hostedRunners',
+  'pruneOfflineRunners',
+  'apps',
+  'orgSecrets'
 ])
 
 const SECRET_VISIBILITY = new Set(['all', 'private', 'selected'])
 
 const REPO_KEYS = new Set([
-  'name', 'description', 'homepage',
-  'private', 'internal',
-  'defaultBranch', 'wiki', 'projects', 'issues', 'discussions', 'archived', 'deleted', 'init', 'template',
-  'merging', 'topics',
-  'teams', 'collaborators', 'deployKeys', 'apps',
-  'branchProtection', 'environments', 'rulesets',
-  'npm', 'pypi', 'crates', 'nuget', 'pubDev', 'secrets', 'security',
-  'actionsAccess', 'forkPrContributorApproval', 'githubPackages', 'pages',
-  'defaults', 'presets', 'renamedFrom'
+  'name',
+  'description',
+  'homepage',
+  'private',
+  'internal',
+  'defaultBranch',
+  'wiki',
+  'projects',
+  'issues',
+  'discussions',
+  'archived',
+  'deleted',
+  'init',
+  'template',
+  'merging',
+  'topics',
+  'teams',
+  'collaborators',
+  'deployKeys',
+  'apps',
+  'branchProtection',
+  'environments',
+  'rulesets',
+  'npm',
+  'pypi',
+  'crates',
+  'nuget',
+  'pubDev',
+  'secrets',
+  'security',
+  'actionsAccess',
+  'forkPrContributorApproval',
+  'githubPackages',
+  'pages',
+  'defaults',
+  'presets',
+  'renamedFrom'
 ])
 
 // renamedFrom names one specific repo, so it makes no sense on a defaults pack, nor does deleted
-const DEFAULTS_KEYS = new Set([...REPO_KEYS, 'extends'].filter((k) => k !== 'renamedFrom' && k !== 'deleted'))
+const DEFAULTS_KEYS = new Set(
+  [...REPO_KEYS, 'extends'].filter((k) => k !== 'renamedFrom' && k !== 'deleted')
+)
 
 const REPO_ALIASES = { extends: 'defaults', inherits: 'defaults', delete: 'deleted' }
 
@@ -1050,20 +1194,32 @@ function validateConfig(config, warn = warnStderr) {
     }
     if (missing.length) {
       throw new Error(
-        'team members not declared in admins/members:\n  - ' + missing.join('\n  - ') +
-        '\nadd them to admins/members (extend a shared file if the canonical list lives elsewhere)'
+        'team members not declared in admins/members:\n  - ' +
+          missing.join('\n  - ') +
+          '\nadd them to admins/members (extend a shared file if the canonical list lives elsewhere)'
       )
     }
   }
 
-  const rootApps = new Set((config.apps || []).filter((a) => a && a.name).map((a) => slugify(a.name)))
+  const rootApps = new Set(
+    (config.apps || []).filter((a) => a && a.name).map((a) => slugify(a.name))
+  )
 
   for (const k of Object.keys(config)) {
-    if (!ROOT_KEYS.has(k)) warn('unknown property "' + k + '" at config root' + suggest(k, ROOT_KEYS, null))
+    if (!ROOT_KEYS.has(k))
+      warn('unknown property "' + k + '" at config root' + suggest(k, ROOT_KEYS, null))
   }
   for (const raw of config.repos || []) {
     for (const k of Object.keys(raw)) {
-      if (!REPO_KEYS.has(k)) warn('unknown property "' + k + '" on repo "' + (raw.name || '?') + '"' + suggest(k, REPO_KEYS, REPO_ALIASES))
+      if (!REPO_KEYS.has(k))
+        warn(
+          'unknown property "' +
+            k +
+            '" on repo "' +
+            (raw.name || '?') +
+            '"' +
+            suggest(k, REPO_KEYS, REPO_ALIASES)
+        )
     }
     validateMerging(raw.merging, 'repo "' + (raw.name || '?') + '"', warn)
     if (raw.renamedFrom !== undefined && raw.renamedFrom === raw.name) {
@@ -1074,7 +1230,14 @@ function validateConfig(config, warn = warnStderr) {
       // apps can arrive through a defaults pack, so check the merged entry
       const where = 'repo "' + (raw.name || '?') + '"'
       for (const slug of normalizeRepoApps(resolveDefaults(raw, config.defaults).apps, where)) {
-        if (rootApps.has(slug)) throw new Error('app "' + slug + '" is declared both in the root "apps" list and on ' + where + ', pick one place or they undo each other')
+        if (rootApps.has(slug))
+          throw new Error(
+            'app "' +
+              slug +
+              '" is declared both in the root "apps" list and on ' +
+              where +
+              ', pick one place or they undo each other'
+          )
       }
     }
     for (const env of raw.environments || []) {
@@ -1089,10 +1252,20 @@ function validateConfig(config, warn = warnStderr) {
   }
   for (const name of Object.keys(config.orgSecrets || {})) {
     const s = config.orgSecrets[name]
-    if (!s || typeof s !== 'object') throw new Error('orgSecrets "' + name + '" must be an object like { "visibility": "selected", "repos": [...] }')
-    if (s.visibility !== undefined && !SECRET_VISIBILITY.has(s.visibility)) throw new Error('orgSecrets "' + name + '" visibility must be one of all, private, selected')
-    if (s.visibility === 'selected' && !(Array.isArray(s.repos) && s.repos.length)) throw new Error('orgSecrets "' + name + '" with visibility "selected" needs a non-empty "repos" list')
-    if (s.visibility !== 'selected' && s.repos) warn('orgSecrets "' + name + '" lists repos but visibility is not "selected", ignored')
+    if (!s || typeof s !== 'object')
+      throw new Error(
+        'orgSecrets "' +
+          name +
+          '" must be an object like { "visibility": "selected", "repos": [...] }'
+      )
+    if (s.visibility !== undefined && !SECRET_VISIBILITY.has(s.visibility))
+      throw new Error('orgSecrets "' + name + '" visibility must be one of all, private, selected')
+    if (s.visibility === 'selected' && !(Array.isArray(s.repos) && s.repos.length))
+      throw new Error(
+        'orgSecrets "' + name + '" with visibility "selected" needs a non-empty "repos" list'
+      )
+    if (s.visibility !== 'selected' && s.repos)
+      warn('orgSecrets "' + name + '" lists repos but visibility is not "selected", ignored')
   }
   for (const name of Object.keys(config.defaults || {})) {
     const entry = config.defaults[name]
@@ -1101,7 +1274,15 @@ function validateConfig(config, warn = warnStderr) {
         warn('"deleted" on defaults "' + name + '" is ignored — set it on the repo entry')
         continue
       }
-      if (!DEFAULTS_KEYS.has(k)) warn('unknown property "' + k + '" on defaults "' + name + '"' + suggest(k, DEFAULTS_KEYS, null))
+      if (!DEFAULTS_KEYS.has(k))
+        warn(
+          'unknown property "' +
+            k +
+            '" on defaults "' +
+            name +
+            '"' +
+            suggest(k, DEFAULTS_KEYS, null)
+        )
     }
     validateMerging(entry && entry.merging, 'defaults "' + name + '"', warn)
   }
@@ -1129,7 +1310,8 @@ function lint(configPath) {
       validateConfig(config, (message) => problems.push({ file, level: 'warning', message }))
       // unknown defaults and old-style preset names only surface on resolve
       for (const raw of config.repos || []) {
-        if (raw.deleted !== true) resolve(resolveDefaults(raw, config.defaults), config.presets || {})
+        if (raw.deleted !== true)
+          resolve(resolveDefaults(raw, config.defaults), config.presets || {})
       }
       loaded.push({ file, config })
     } catch (err) {
@@ -1149,11 +1331,23 @@ function lint(configPath) {
     const seen = new Set()
     for (const raw of config.repos || []) {
       if (raw.deleted === true) continue
-      for (const slug of normalizeRepoApps(resolveDefaults(raw, config.defaults).apps, 'repo "' + raw.name + '"')) {
+      for (const slug of normalizeRepoApps(
+        resolveDefaults(raw, config.defaults).apps,
+        'repo "' + raw.name + '"'
+      )) {
         const other = rootApps.get(config.org + '/' + slug)
         if (!other || other === file || seen.has(slug)) continue
         seen.add(slug)
-        problems.push({ file, level: 'error', message: 'app "' + slug + '" is on repo entries here and in the root "apps" list of ' + path.relative(process.cwd(), other) + ', pick one place' })
+        problems.push({
+          file,
+          level: 'error',
+          message:
+            'app "' +
+            slug +
+            '" is on repo entries here and in the root "apps" list of ' +
+            path.relative(process.cwd(), other) +
+            ', pick one place'
+        })
       }
     }
   }
@@ -1175,7 +1369,10 @@ function preview(configPath, name) {
     if (org && (config.org || '').toLowerCase() !== org.toLowerCase()) continue
     for (const raw of config.repos || []) {
       if (repoName && (raw.name || '').toLowerCase() !== repoName.toLowerCase()) continue
-      const repo = raw.deleted === true ? raw : resolve(resolveDefaults(raw, config.defaults), config.presets || {})
+      const repo =
+        raw.deleted === true
+          ? raw
+          : resolve(resolveDefaults(raw, config.defaults), config.presets || {})
       // name first, the defaults merge leaves it wherever it fell
       out.push({ file, org: config.org, repo: { name: repo.name, ...repo } })
     }
@@ -1186,8 +1383,14 @@ function preview(configPath, name) {
 
 function validateSecretNames(secrets, where) {
   if (secrets === undefined) return
-  if (typeof secrets === 'string') throw new Error('secrets on ' + where + ' is a file path, it must now be a list of names like ["NPM_TOKEN"] (values are prompted for on apply)')
-  if (!Array.isArray(secrets) || secrets.some((s) => typeof s !== 'string' || !s)) throw new Error('secrets on ' + where + ' must be a list of names')
+  if (typeof secrets === 'string')
+    throw new Error(
+      'secrets on ' +
+        where +
+        ' is a file path, it must now be a list of names like ["NPM_TOKEN"] (values are prompted for on apply)'
+    )
+  if (!Array.isArray(secrets) || secrets.some((s) => typeof s !== 'string' || !s))
+    throw new Error('secrets on ' + where + ' must be a list of names')
 }
 
 function normalizeSecretNames(names) {
@@ -1211,14 +1414,19 @@ function suggest(unknown, allowed, aliases) {
   let bestDist = Infinity
   for (const k of allowed) {
     const d = editDistance(unknown, k)
-    if (d < bestDist) { bestDist = d; best = k }
+    if (d < bestDist) {
+      bestDist = d
+      best = k
+    }
   }
-  if (best && bestDist <= Math.max(2, Math.floor(unknown.length / 3))) return ' — did you mean "' + best + '"?'
+  if (best && bestDist <= Math.max(2, Math.floor(unknown.length / 3)))
+    return ' — did you mean "' + best + '"?'
   return ''
 }
 
 function editDistance(a, b) {
-  const m = a.length, n = b.length
+  const m = a.length,
+    n = b.length
   if (!m) return n
   if (!n) return m
   const prev = new Array(n + 1)
@@ -1248,9 +1456,30 @@ function expandIncludesInner(configPath, seen) {
   const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
   if (!raw.includes) return [configPath]
 
-  const FORBIDDEN = ['org', 'repos', 'teams', 'admins', 'members', 'security', 'runnerGroups', 'hostedRunners', 'pruneOfflineRunners', 'enterprise', 'extends', 'presets', 'defaults']
+  const FORBIDDEN = [
+    'org',
+    'repos',
+    'teams',
+    'admins',
+    'members',
+    'security',
+    'runnerGroups',
+    'hostedRunners',
+    'pruneOfflineRunners',
+    'enterprise',
+    'extends',
+    'presets',
+    'defaults'
+  ]
   for (const k of FORBIDDEN) {
-    if (k in raw) throw new Error('manifest ' + configPath + ' has both "includes" and "' + k + '" — manifests are orchestration-only')
+    if (k in raw)
+      throw new Error(
+        'manifest ' +
+          configPath +
+          ' has both "includes" and "' +
+          k +
+          '" — manifests are orchestration-only'
+      )
   }
 
   const next = new Set(seen)
@@ -1298,7 +1527,14 @@ function deepMerge(base, overlay) {
   const out = { ...base }
   for (const key of Object.keys(overlay)) {
     const ov = overlay[key]
-    if (ov && typeof ov === 'object' && !Array.isArray(ov) && out[key] && typeof out[key] === 'object' && !Array.isArray(out[key])) {
+    if (
+      ov &&
+      typeof ov === 'object' &&
+      !Array.isArray(ov) &&
+      out[key] &&
+      typeof out[key] === 'object' &&
+      !Array.isArray(out[key])
+    ) {
       out[key] = deepMerge(out[key], ov)
     } else {
       out[key] = ov
@@ -1327,7 +1563,20 @@ function repoChanged(repo, prev, opts) {
   if (prev.archived && !repo.archived) return true
   const settings = {}
   const prevSettings = {}
-  for (const k of ['description', 'homepage', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'issues', 'discussions', 'security', 'template']) {
+  for (const k of [
+    'description',
+    'homepage',
+    'private',
+    'internal',
+    'defaultBranch',
+    'merging',
+    'wiki',
+    'projects',
+    'issues',
+    'discussions',
+    'security',
+    'template'
+  ]) {
     if (repo[k] === undefined) continue
     if (k === 'template' && typeof repo[k] !== 'boolean') continue
     settings[k] = repo[k]
@@ -1336,7 +1585,8 @@ function repoChanged(repo, prev, opts) {
   if (changed(settings, prevSettings)) return true
   if ((repo.topics || prev.topics) && changed(repo.topics, prev.topics)) return true
   if ((repo.teams || prev.teams) && changed(repo.teams, prev.teams)) return true
-  if ((repo.collaborators || prev.collaborators) && changed(repo.collaborators, prev.collaborators)) return true
+  if ((repo.collaborators || prev.collaborators) && changed(repo.collaborators, prev.collaborators))
+    return true
   if ((repo.deployKeys || prev.deployKeys) && changed(repo.deployKeys, prev.deployKeys)) return true
   if ((repo.apps || prev.apps) && changed(repo.apps, prev.apps)) return true
   if (changed(repo.branchProtection, prev.branchProtection)) return true
@@ -1347,12 +1597,29 @@ function repoChanged(repo, prev, opts) {
   if ((repo.crates || prev.crates) && changed(repo.crates, prev.crates)) return true
   if ((repo.nuget || prev.nuget) && changed(repo.nuget, prev.nuget)) return true
   if ((repo.pubDev || prev.pubDev) && changed(repo.pubDev, prev.pubDev)) return true
-  if ((repo.githubPackages || prev.githubPackages) && changed(repo.githubPackages, prev.githubPackages)) return true
+  if (
+    (repo.githubPackages || prev.githubPackages) &&
+    changed(repo.githubPackages, prev.githubPackages)
+  )
+    return true
   if (repo.actionsAccess !== undefined && repo.actionsAccess !== prev.actionsAccess) return true
-  if (repo.forkPrContributorApproval !== undefined && repo.forkPrContributorApproval !== prev.forkPrContributorApproval) return true
+  if (
+    repo.forkPrContributorApproval !== undefined &&
+    repo.forkPrContributorApproval !== prev.forkPrContributorApproval
+  )
+    return true
   if (repo.pages !== undefined && changed(repo.pages, prev.pages)) return true
-  if ((repo.secrets || prev.secrets) && secretsChanged(repo.secrets || [], prev.secrets, opts)) return true
-  if (repo.environments && repo.environments.some((e) => (e.secrets || (prev.envSecrets || {})[e.name]) && secretsChanged(e.secrets || [], (prev.envSecrets || {})[e.name], opts))) return true
+  if ((repo.secrets || prev.secrets) && secretsChanged(repo.secrets || [], prev.secrets, opts))
+    return true
+  if (
+    repo.environments &&
+    repo.environments.some(
+      (e) =>
+        (e.secrets || (prev.envSecrets || {})[e.name]) &&
+        secretsChanged(e.secrets || [], (prev.envSecrets || {})[e.name], opts)
+    )
+  )
+    return true
   if (prev.envSecrets && !repo.environments) return true
   if (repo.init && !prev.initialized) return true
   return false
@@ -1393,7 +1660,20 @@ async function reconcile(org, repo, prev, dry, done, opts) {
 
   const settings = {}
   const prevSettings = {}
-  for (const k of ['description', 'homepage', 'private', 'internal', 'defaultBranch', 'merging', 'wiki', 'projects', 'issues', 'discussions', 'security', 'template']) {
+  for (const k of [
+    'description',
+    'homepage',
+    'private',
+    'internal',
+    'defaultBranch',
+    'merging',
+    'wiki',
+    'projects',
+    'issues',
+    'discussions',
+    'security',
+    'template'
+  ]) {
     if (repo[k] === undefined) continue
     if (k === 'template' && typeof repo[k] !== 'boolean') continue
     settings[k] = repo[k]
@@ -1428,10 +1708,14 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   }
   if (repo.actionsAccess !== undefined) done.actionsAccess = repo.actionsAccess
 
-  if (repo.forkPrContributorApproval !== undefined && repo.forkPrContributorApproval !== prev.forkPrContributorApproval) {
+  if (
+    repo.forkPrContributorApproval !== undefined &&
+    repo.forkPrContributorApproval !== prev.forkPrContributorApproval
+  ) {
     await reconcileForkPrContributorApproval(org, repo.name, repo.forkPrContributorApproval, dry)
   }
-  if (repo.forkPrContributorApproval !== undefined) done.forkPrContributorApproval = repo.forkPrContributorApproval
+  if (repo.forkPrContributorApproval !== undefined)
+    done.forkPrContributorApproval = repo.forkPrContributorApproval
 
   if (repo.pages !== undefined && changed(repo.pages, prev.pages)) {
     await reconcilePages(org, repo.name, repo.pages, dry, opts)
@@ -1449,14 +1733,29 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     done.teams = repo.teams
   }
 
-  if ((repo.collaborators || prev.collaborators) && changed(repo.collaborators, prev.collaborators)) {
-    done.collaborators = await reconcileCollaborators(org, repo.name, repo.collaborators || [], prev.collaborators, dry)
+  if (
+    (repo.collaborators || prev.collaborators) &&
+    changed(repo.collaborators, prev.collaborators)
+  ) {
+    done.collaborators = await reconcileCollaborators(
+      org,
+      repo.name,
+      repo.collaborators || [],
+      prev.collaborators,
+      dry
+    )
   } else {
     done.collaborators = repo.collaborators
   }
 
   if ((repo.deployKeys || prev.deployKeys) && changed(repo.deployKeys, prev.deployKeys)) {
-    done.deployKeys = await reconcileDeployKeys(org, repo.name, repo.deployKeys, prev.deployKeys, dry)
+    done.deployKeys = await reconcileDeployKeys(
+      org,
+      repo.name,
+      repo.deployKeys,
+      prev.deployKeys,
+      dry
+    )
   } else {
     done.deployKeys = repo.deployKeys
   }
@@ -1477,7 +1776,12 @@ async function reconcile(org, repo, prev, dry, done, opts) {
       print(dry, 'remove-branch-protection', `${org}/${repo.name}`, branch)
       if (!dry) {
         try {
-          await gh(['api', `repos/${org}/${repo.name}/branches/${branch}/protection`, '--method', 'DELETE'])
+          await gh([
+            'api',
+            `repos/${org}/${repo.name}/branches/${branch}/protection`,
+            '--method',
+            'DELETE'
+          ])
         } catch (err) {
           if (!/Branch not protected|Not Found/.test(err.message)) throw err
         }
@@ -1495,11 +1799,22 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     for (const env of prev.environments || []) {
       if (desiredEnvs.has(env.name)) continue
       print(dry, 'remove-environment', `${org}/${repo.name}`, env.name)
-      if (!dry) await ghIgnoreNotFound(['api', `repos/${org}/${repo.name}/environments/${env.name}`, '--method', 'DELETE'])
+      if (!dry)
+        await ghIgnoreNotFound([
+          'api',
+          `repos/${org}/${repo.name}/environments/${env.name}`,
+          '--method',
+          'DELETE'
+        ])
     }
 
     if (skip) {
-      print(dry, 'skip-environments', `${org}/${repo.name}`, 'requires enterprise for private repos with reviewers')
+      print(
+        dry,
+        'skip-environments',
+        `${org}/${repo.name}`,
+        'requires enterprise for private repos with reviewers'
+      )
     } else {
       for (const env of repo.environments || []) {
         await reconcileEnvironment(org, repo.name, env, dry)
@@ -1542,7 +1857,15 @@ async function reconcile(org, repo, prev, dry, done, opts) {
   if (repo.githubPackages) done.githubPackages = repo.githubPackages
 
   if (repo.secrets || prev.secrets) {
-    const next = await reconcileSecrets(org, repo.name, repo.secrets || [], prev.secrets, dry, null, opts)
+    const next = await reconcileSecrets(
+      org,
+      repo.name,
+      repo.secrets || [],
+      prev.secrets,
+      dry,
+      null,
+      opts
+    )
     done.secrets = repo.secrets ? next : undefined
   }
 
@@ -1552,7 +1875,15 @@ async function reconcile(org, repo, prev, dry, done, opts) {
     const desiredEnvNames = new Set((repo.environments || []).map((e) => e.name))
     for (const env of repo.environments || []) {
       if (!env.secrets && !envSecrets[env.name]) continue
-      newEnvSecrets[env.name] = await reconcileSecrets(org, repo.name, env.secrets || [], envSecrets[env.name], dry, env.name, opts)
+      newEnvSecrets[env.name] = await reconcileSecrets(
+        org,
+        repo.name,
+        env.secrets || [],
+        envSecrets[env.name],
+        dry,
+        env.name,
+        opts
+      )
       if (!env.secrets) delete newEnvSecrets[env.name]
     }
     // a removed environment took its secrets with it. secrets state knows for
@@ -1657,12 +1988,26 @@ async function reconcileSettings(org, repo, dry, prev = {}) {
   if (repo.security) {
     const sa = {}
     const s = repo.security
-    const isPublic = repo.private === false || repo.internal === true || (repo.private === undefined && prev.private === false)
-    if (s.advancedSecurity !== undefined && !isPublic) sa.advanced_security = { status: s.advancedSecurity ? 'enabled' : 'disabled' }
-    if (s.secretScanning !== undefined) sa.secret_scanning = { status: s.secretScanning ? 'enabled' : 'disabled' }
-    if (s.secretScanningPushProtection !== undefined) sa.secret_scanning_push_protection = { status: s.secretScanningPushProtection ? 'enabled' : 'disabled' }
-    if (s.secretScanningValidityChecks !== undefined) sa.secret_scanning_validity_checks = { status: s.secretScanningValidityChecks ? 'enabled' : 'disabled' }
-    if (s.dependabotSecurityUpdates !== undefined) sa.dependabot_security_updates = { status: s.dependabotSecurityUpdates ? 'enabled' : 'disabled' }
+    const isPublic =
+      repo.private === false ||
+      repo.internal === true ||
+      (repo.private === undefined && prev.private === false)
+    if (s.advancedSecurity !== undefined && !isPublic)
+      sa.advanced_security = { status: s.advancedSecurity ? 'enabled' : 'disabled' }
+    if (s.secretScanning !== undefined)
+      sa.secret_scanning = { status: s.secretScanning ? 'enabled' : 'disabled' }
+    if (s.secretScanningPushProtection !== undefined)
+      sa.secret_scanning_push_protection = {
+        status: s.secretScanningPushProtection ? 'enabled' : 'disabled'
+      }
+    if (s.secretScanningValidityChecks !== undefined)
+      sa.secret_scanning_validity_checks = {
+        status: s.secretScanningValidityChecks ? 'enabled' : 'disabled'
+      }
+    if (s.dependabotSecurityUpdates !== undefined)
+      sa.dependabot_security_updates = {
+        status: s.dependabotSecurityUpdates ? 'enabled' : 'disabled'
+      }
     if (Object.keys(sa).length) patch.security_and_analysis = sa
   }
 
@@ -1672,10 +2017,20 @@ async function reconcileSettings(org, repo, dry, prev = {}) {
       branches = JSON.parse(await gh(['api', `repos/${org}/${repo.name}/branches`]))
     } catch {}
     if (branches.length === 0) {
-      print(dry, 'skip-default-branch', `${org}/${repo.name}`, 'repo is empty, ' + patch.default_branch + ' will be created on first commit')
+      print(
+        dry,
+        'skip-default-branch',
+        `${org}/${repo.name}`,
+        'repo is empty, ' + patch.default_branch + ' will be created on first commit'
+      )
       delete patch.default_branch
     } else if (!branches.some((b) => b.name === patch.default_branch)) {
-      print(dry, 'skip-default-branch', `${org}/${repo.name}`, patch.default_branch + ' branch does not exist on this repo')
+      print(
+        dry,
+        'skip-default-branch',
+        `${org}/${repo.name}`,
+        patch.default_branch + ' branch does not exist on this repo'
+      )
       delete patch.default_branch
     }
   }
@@ -1692,8 +2047,11 @@ async function reconcileSettings(org, repo, dry, prev = {}) {
       const is422 = /Validation Failed|HTTP 422/i.test(err.message)
       if (!is422) throw err
 
-      const isAdvancedSecurityPublic = /Advanced security is always available for public repos/i.test(err.message)
-      const isSecurityEnforced = /enforced security configuration prevented modifying/i.test(err.message)
+      const isAdvancedSecurityPublic =
+        /Advanced security is always available for public repos/i.test(err.message)
+      const isSecurityEnforced = /enforced security configuration prevented modifying/i.test(
+        err.message
+      )
       const isSecurityIssue = isAdvancedSecurityPublic || isSecurityEnforced
       const isVisibilityIssue = patch.private !== undefined || patch.visibility !== undefined
 
@@ -1702,7 +2060,11 @@ async function reconcileSettings(org, repo, dry, prev = {}) {
 
       if (isSecurityIssue && retry.security_and_analysis) {
         delete retry.security_and_analysis
-        reasons.push(isSecurityEnforced ? 'security enforced by org policy' : 'advanced security always on for public repos')
+        reasons.push(
+          isSecurityEnforced
+            ? 'security enforced by org policy'
+            : 'advanced security always on for public repos'
+        )
       }
       if (isVisibilityIssue) {
         delete retry.private
@@ -1721,7 +2083,12 @@ async function reconcileSettings(org, repo, dry, prev = {}) {
       if (!reasons.length) throw err
 
       if (!Object.keys(retry).length) {
-        print(dry, 'skip-update', `${org}/${repo.name}`, reasons.join('; ') + ' and no other fields')
+        print(
+          dry,
+          'skip-update',
+          `${org}/${repo.name}`,
+          reasons.join('; ') + ' and no other fields'
+        )
         return
       }
 
@@ -1735,13 +2102,24 @@ async function reconcileSettings(org, repo, dry, prev = {}) {
 
 async function reconcileActionsAccess(org, name, level, dry) {
   if (!['none', 'organization', 'enterprise'].includes(level)) {
-    throw new Error('invalid actionsAccess "' + level + '" for ' + org + '/' + name + ' (expected none|organization|enterprise)')
+    throw new Error(
+      'invalid actionsAccess "' +
+        level +
+        '" for ' +
+        org +
+        '/' +
+        name +
+        ' (expected none|organization|enterprise)'
+    )
   }
   print(dry, 'actions-access', `${org}/${name}`, level)
   if (!dry) {
-    await gh(['api', `repos/${org}/${name}/actions/permissions/access`, '--method', 'PUT', '--input', '-'], {
-      body: { access_level: level }
-    })
+    await gh(
+      ['api', `repos/${org}/${name}/actions/permissions/access`, '--method', 'PUT', '--input', '-'],
+      {
+        body: { access_level: level }
+      }
+    )
   }
 }
 
@@ -1753,13 +2131,33 @@ const FORK_PR_APPROVAL_POLICIES = [
 
 async function reconcileForkPrContributorApproval(org, name, policy, dry) {
   if (!FORK_PR_APPROVAL_POLICIES.includes(policy)) {
-    throw new Error('invalid forkPrContributorApproval "' + policy + '" for ' + org + '/' + name + ' (expected ' + FORK_PR_APPROVAL_POLICIES.join('|') + ')')
+    throw new Error(
+      'invalid forkPrContributorApproval "' +
+        policy +
+        '" for ' +
+        org +
+        '/' +
+        name +
+        ' (expected ' +
+        FORK_PR_APPROVAL_POLICIES.join('|') +
+        ')'
+    )
   }
   print(dry, 'fork-pr-approval', `${org}/${name}`, policy)
   if (!dry) {
-    await gh(['api', `repos/${org}/${name}/actions/permissions/fork-pr-contributor-approval`, '--method', 'PUT', '--input', '-'], {
-      body: { approval_policy: policy }
-    })
+    await gh(
+      [
+        'api',
+        `repos/${org}/${name}/actions/permissions/fork-pr-contributor-approval`,
+        '--method',
+        'PUT',
+        '--input',
+        '-'
+      ],
+      {
+        body: { approval_policy: policy }
+      }
+    )
   }
 }
 
@@ -1774,7 +2172,14 @@ async function reconcileCodeScanning(org, name, enabled, dry) {
   if (dry) return
   try {
     await gh(
-      ['api', `repos/${org}/${name}/code-scanning/default-setup`, '--method', 'PATCH', '--input', '-'],
+      [
+        'api',
+        `repos/${org}/${name}/code-scanning/default-setup`,
+        '--method',
+        'PATCH',
+        '--input',
+        '-'
+      ],
       { body: { state: desired } }
     )
   } catch (err) {
@@ -1804,7 +2209,9 @@ function pagesBody(pages) {
 }
 
 function describePages(pages) {
-  const parts = [pages.build === 'branch' ? 'branch ' + pages.branch + ' ' + (pages.path || '/') : 'workflow']
+  const parts = [
+    pages.build === 'branch' ? 'branch ' + pages.branch + ' ' + (pages.path || '/') : 'workflow'
+  ]
   if (pages.private !== undefined) parts.push(pages.private ? 'private' : 'public')
   return parts.join(', ')
 }
@@ -1826,13 +2233,17 @@ async function reconcilePages(org, name, pages, dry, opts) {
 
   const build = pages.build || 'workflow'
   if (!['workflow', 'branch'].includes(build)) {
-    throw new Error('invalid pages.build "' + build + '" for ' + org + '/' + name + ' (expected workflow|branch)')
+    throw new Error(
+      'invalid pages.build "' + build + '" for ' + org + '/' + name + ' (expected workflow|branch)'
+    )
   }
-  if (build === 'branch' && !pages.branch) throw new Error('pages.build "branch" needs pages.branch for ' + org + '/' + name)
+  if (build === 'branch' && !pages.branch)
+    throw new Error('pages.build "branch" needs pages.branch for ' + org + '/' + name)
   pages = { ...pages, build }
 
   // visibility is an Enterprise feature; elsewhere the site is always public
-  const visibility = pages.private !== undefined && opts.enterprise ? { public: !pages.private } : {}
+  const visibility =
+    pages.private !== undefined && opts.enterprise ? { public: !pages.private } : {}
   if (pages.private && !opts.enterprise) {
     print(dry, 'skip-pages-private', `${org}/${name}`, 'private Pages requires enterprise')
   }
@@ -1841,28 +2252,41 @@ async function reconcilePages(org, name, pages, dry, opts) {
   if (!current) {
     // a new site is public until the PUT below lands; nothing is deployed yet, so nothing is exposed
     print(dry, 'create-pages', `${org}/${name}`, describePages(pages))
-    if (!dry) await gh(['api', `repos/${org}/${name}/pages`, '--method', 'POST', '--input', '-'], { body })
+    if (!dry)
+      await gh(['api', `repos/${org}/${name}/pages`, '--method', 'POST', '--input', '-'], { body })
     current = { ...body, public: true }
   }
 
   const same =
     current.build_type === body.build_type &&
-    (!body.source || (current.source && current.source.branch === body.source.branch && (current.source.path || '/') === body.source.path)) &&
+    (!body.source ||
+      (current.source &&
+        current.source.branch === body.source.branch &&
+        (current.source.path || '/') === body.source.path)) &&
     (visibility.public === undefined || current.public === visibility.public)
   if (same) return
 
   print(dry, 'pages', `${org}/${name}`, describePages(pages))
   if (dry) return
-  await gh(['api', `repos/${org}/${name}/pages`, '--method', 'PUT', '--input', '-'], { body: { ...body, ...visibility } })
+  await gh(['api', `repos/${org}/${name}/pages`, '--method', 'PUT', '--input', '-'], {
+    body: { ...body, ...visibility }
+  })
 }
 
 async function reconcileOrgSecurity(org, security, dry) {
   const patch = {}
-  if (security.advancedSecurity !== undefined) patch.advanced_security_enabled_for_new_repositories = !!security.advancedSecurity
-  if (security.secretScanning !== undefined) patch.secret_scanning_enabled_for_new_repositories = !!security.secretScanning
-  if (security.secretScanningPushProtection !== undefined) patch.secret_scanning_push_protection_enabled_for_new_repositories = !!security.secretScanningPushProtection
-  if (security.dependabotAlerts !== undefined) patch.dependabot_alerts_enabled_for_new_repositories = !!security.dependabotAlerts
-  if (security.dependabotSecurityUpdates !== undefined) patch.dependabot_security_updates_enabled_for_new_repositories = !!security.dependabotSecurityUpdates
+  if (security.advancedSecurity !== undefined)
+    patch.advanced_security_enabled_for_new_repositories = !!security.advancedSecurity
+  if (security.secretScanning !== undefined)
+    patch.secret_scanning_enabled_for_new_repositories = !!security.secretScanning
+  if (security.secretScanningPushProtection !== undefined)
+    patch.secret_scanning_push_protection_enabled_for_new_repositories =
+      !!security.secretScanningPushProtection
+  if (security.dependabotAlerts !== undefined)
+    patch.dependabot_alerts_enabled_for_new_repositories = !!security.dependabotAlerts
+  if (security.dependabotSecurityUpdates !== undefined)
+    patch.dependabot_security_updates_enabled_for_new_repositories =
+      !!security.dependabotSecurityUpdates
   if (!Object.keys(patch).length) return
   print(dry, 'org-security', org, Object.keys(patch).join(', '))
   if (!dry) await gh(['api', `orgs/${org}`, '--method', 'PATCH', '--input', '-'], { body: patch })
@@ -1883,7 +2307,12 @@ async function reconcileRunnerGroups(org, desired, prev, dry) {
       print(dry, 'create-runner-group', org, name)
       if (!dry) {
         const body = await buildRunnerGroupBody(org, name, want)
-        const created = JSON.parse(await gh(['api', `orgs/${org}/actions/runner-groups`, '--method', 'POST', '--input', '-'], { body }))
+        const created = JSON.parse(
+          await gh(
+            ['api', `orgs/${org}/actions/runner-groups`, '--method', 'POST', '--input', '-'],
+            { body }
+          )
+        )
         if (want.visibility === 'selected' && want.repos) {
           await setRunnerGroupRepos(org, created.id, want.repos, dry)
         }
@@ -1892,7 +2321,17 @@ async function reconcileRunnerGroups(org, desired, prev, dry) {
       print(dry, 'update-runner-group', org, name)
       if (!dry) {
         const body = await buildRunnerGroupBody(org, name, want)
-        await gh(['api', `orgs/${org}/actions/runner-groups/${current.id}`, '--method', 'PATCH', '--input', '-'], { body })
+        await gh(
+          [
+            'api',
+            `orgs/${org}/actions/runner-groups/${current.id}`,
+            '--method',
+            'PATCH',
+            '--input',
+            '-'
+          ],
+          { body }
+        )
         if (want.visibility === 'selected' && want.repos) {
           await setRunnerGroupRepos(org, current.id, want.repos, dry)
         }
@@ -1922,7 +2361,8 @@ async function reconcileRunnerGroups(org, desired, prev, dry) {
 
 function normalizeRunnerGroup(cfg) {
   const out = { visibility: cfg.visibility || 'all' }
-  if (cfg.allowsPublicRepositories !== undefined) out.allowsPublicRepositories = !!cfg.allowsPublicRepositories
+  if (cfg.allowsPublicRepositories !== undefined)
+    out.allowsPublicRepositories = !!cfg.allowsPublicRepositories
   if (cfg.restrictedToWorkflows) out.restrictedToWorkflows = cfg.restrictedToWorkflows
   if (cfg.repos) out.repos = cfg.repos.slice().sort()
   return out
@@ -1930,7 +2370,8 @@ function normalizeRunnerGroup(cfg) {
 
 async function buildRunnerGroupBody(org, name, cfg) {
   const body = { name, visibility: cfg.visibility }
-  if (cfg.allowsPublicRepositories !== undefined) body.allows_public_repositories = cfg.allowsPublicRepositories
+  if (cfg.allowsPublicRepositories !== undefined)
+    body.allows_public_repositories = cfg.allowsPublicRepositories
   if (cfg.restrictedToWorkflows) {
     body.restricted_to_workflows = true
     body.selected_workflows = cfg.restrictedToWorkflows
@@ -1940,10 +2381,18 @@ async function buildRunnerGroupBody(org, name, cfg) {
 
 function runnerGroupMatches(current, want) {
   if (current.visibility !== want.visibility) return false
-  if (want.allowsPublicRepositories !== undefined && current.allows_public_repositories !== want.allowsPublicRepositories) return false
+  if (
+    want.allowsPublicRepositories !== undefined &&
+    current.allows_public_repositories !== want.allowsPublicRepositories
+  )
+    return false
   if (want.restrictedToWorkflows) {
     if (!current.restricted_to_workflows) return false
-    if (JSON.stringify((current.selected_workflows || []).sort()) !== JSON.stringify(want.restrictedToWorkflows.slice().sort())) return false
+    if (
+      JSON.stringify((current.selected_workflows || []).sort()) !==
+      JSON.stringify(want.restrictedToWorkflows.slice().sort())
+    )
+      return false
   } else if (current.restricted_to_workflows) {
     return false
   }
@@ -1958,9 +2407,19 @@ async function setRunnerGroupRepos(org, groupId, repoNames, dry) {
   }
   print(dry, 'runner-group-repos', org, repoNames.join(','))
   if (!dry) {
-    await gh(['api', `orgs/${org}/actions/runner-groups/${groupId}/repositories`, '--method', 'PUT', '--input', '-'], {
-      body: { selected_repository_ids: ids }
-    })
+    await gh(
+      [
+        'api',
+        `orgs/${org}/actions/runner-groups/${groupId}/repositories`,
+        '--method',
+        'PUT',
+        '--input',
+        '-'
+      ],
+      {
+        body: { selected_repository_ids: ids }
+      }
+    )
   }
 }
 
@@ -1988,7 +2447,10 @@ async function reconcileHostedRunners(org, desired, prev, dry) {
         if (!imageCatalog) imageCatalog = await listHostedRunnerImages(org)
         if (!groupCatalog) groupCatalog = await listRunnerGroups(org)
         const body = buildHostedRunnerBody(name, want, imageCatalog, groupCatalog)
-        await gh(['api', `orgs/${org}/actions/hosted-runners`, '--method', 'POST', '--input', '-'], { body })
+        await gh(
+          ['api', `orgs/${org}/actions/hosted-runners`, '--method', 'POST', '--input', '-'],
+          { body }
+        )
       }
     } else if (changed(want, prevCfg) || !hostedRunnerMatches(current, want)) {
       print(dry, 'update-hosted-runner', org, name)
@@ -1997,7 +2459,17 @@ async function reconcileHostedRunners(org, desired, prev, dry) {
         if (!groupCatalog) groupCatalog = await listRunnerGroups(org)
         const body = buildHostedRunnerBody(name, want, imageCatalog, groupCatalog)
         delete body.name // name not updatable via PATCH
-        await gh(['api', `orgs/${org}/actions/hosted-runners/${current.id}`, '--method', 'PATCH', '--input', '-'], { body })
+        await gh(
+          [
+            'api',
+            `orgs/${org}/actions/hosted-runners/${current.id}`,
+            '--method',
+            'PATCH',
+            '--input',
+            '-'
+          ],
+          { body }
+        )
       }
     }
 
@@ -2046,8 +2518,14 @@ function buildHostedRunnerBody(name, want, imageCatalog, groupCatalog) {
 
 function hostedRunnerMatches(current, want) {
   if (current.size !== want.size) return false
-  if (current.image_details && current.image_details.id !== want.image && current.image_details.display_name !== want.image) return false
-  if (want.maximumRunners !== undefined && current.maximum_runners !== want.maximumRunners) return false
+  if (
+    current.image_details &&
+    current.image_details.id !== want.image &&
+    current.image_details.display_name !== want.image
+  )
+    return false
+  if (want.maximumRunners !== undefined && current.maximum_runners !== want.maximumRunners)
+    return false
   return true
 }
 
@@ -2061,7 +2539,9 @@ async function listHostedRunners(org) {
 }
 
 async function listHostedRunnerImages(org) {
-  const github = JSON.parse(await gh(['api', `orgs/${org}/actions/hosted-runners/images/github-owned`]))
+  const github = JSON.parse(
+    await gh(['api', `orgs/${org}/actions/hosted-runners/images/github-owned`])
+  )
   const partner = JSON.parse(await gh(['api', `orgs/${org}/actions/hosted-runners/images/partner`]))
   return [...(github.images || []), ...(partner.images || [])]
 }
@@ -2089,7 +2569,9 @@ async function reconcileGithubPackages(org, repoName, desired, dry) {
     const name = entry.name || repoName
     if (!entry.visibility) throw new Error('githubPackages entry "' + name + '" missing visibility')
     if (!['public', 'private', 'internal'].includes(entry.visibility)) {
-      throw new Error('githubPackages entry "' + name + '" has invalid visibility: ' + entry.visibility)
+      throw new Error(
+        'githubPackages entry "' + name + '" has invalid visibility: ' + entry.visibility
+      )
     }
     const encoded = encodeURIComponent(name)
     let current
@@ -2099,17 +2581,49 @@ async function reconcileGithubPackages(org, repoName, desired, dry) {
       if (/Not Found|HTTP 404/i.test(err.message)) {
         const others = await findPackageTypes(org, encoded, type)
         if (others.length) {
-          throw new Error('package ' + name + ' is published as "' + others.join('", "') + '" on org ' + org + ', not "' + type + '" — set "type": "' + others[0] + '" in the githubPackages entry')
+          throw new Error(
+            'package ' +
+              name +
+              ' is published as "' +
+              others.join('", "') +
+              '" on org ' +
+              org +
+              ', not "' +
+              type +
+              '" — set "type": "' +
+              others[0] +
+              '" in the githubPackages entry'
+          )
         }
-        throw new Error('package ' + name + ' (' + type + ') not published on GitHub Packages for org ' + org + ' — publish it before setting visibility')
+        throw new Error(
+          'package ' +
+            name +
+            ' (' +
+            type +
+            ') not published on GitHub Packages for org ' +
+            org +
+            ' — publish it before setting visibility'
+        )
       }
       throw err
     }
     if (current.visibility === entry.visibility) continue
     // GitHub has no REST API to change package visibility — it's web-UI only,
     // so print the exact setting to flip instead of a doomed PATCH.
-    print(dry, 'package-visibility-manual', `${org}/${name}`, current.visibility + ' -> ' + entry.visibility)
-    const hint = '    Set it in the UI: https://github.com/orgs/' + org + '/packages/' + type + '/' + encoded + '/settings (Danger Zone → Change visibility)'
+    print(
+      dry,
+      'package-visibility-manual',
+      `${org}/${name}`,
+      current.visibility + ' -> ' + entry.visibility
+    )
+    const hint =
+      '    Set it in the UI: https://github.com/orgs/' +
+      org +
+      '/packages/' +
+      type +
+      '/' +
+      encoded +
+      '/settings (Danger Zone → Change visibility)'
     console.log(hint)
     audit(hint)
   }
@@ -2129,9 +2643,14 @@ async function reconcileApps(org, desired, prev, dry) {
     if (!entry.name) throw new Error('apps entry missing name')
     const hasAll = entry.allRepos === true
     const hasSelected = Array.isArray(entry.repos)
-    if (hasAll && hasSelected) throw new Error('app "' + entry.name + '" has both allRepos and repos — pick one')
-    if (!hasAll && !hasSelected) throw new Error('app "' + entry.name + '" needs either allRepos: true or repos: [...]')
-    if (entry.allRepos === false) throw new Error('app "' + entry.name + '" has allRepos: false — use repos: [...] for selected access')
+    if (hasAll && hasSelected)
+      throw new Error('app "' + entry.name + '" has both allRepos and repos — pick one')
+    if (!hasAll && !hasSelected)
+      throw new Error('app "' + entry.name + '" needs either allRepos: true or repos: [...]')
+    if (entry.allRepos === false)
+      throw new Error(
+        'app "' + entry.name + '" has allRepos: false — use repos: [...] for selected access'
+      )
   }
 
   const installations = JSON.parse(await gh(['api', `orgs/${org}/installations`, '--paginate']))
@@ -2140,16 +2659,34 @@ async function reconcileApps(org, desired, prev, dry) {
   for (const entry of desired) {
     const slug = slugify(entry.name)
     const install = bySlug.get(slug)
-    if (!install) throw new Error('app "' + entry.name + '" (slug "' + slug + '") is not installed on ' + org + ' — install it via the UI first')
+    if (!install)
+      throw new Error(
+        'app "' +
+          entry.name +
+          '" (slug "' +
+          slug +
+          '") is not installed on ' +
+          org +
+          ' — install it via the UI first'
+      )
 
     const wantsAll = entry.allRepos === true
     const currentIsAll = install.repository_selection === 'all'
 
     if (wantsAll !== currentIsAll) {
       throw new Error(
-        'app "' + entry.name + '" scope mismatch: config wants ' + (wantsAll ? '"all"' : '"selected"') +
-        ' but installation is "' + install.repository_selection + '" — toggle it in the UI first ' +
-        '(github.com/organizations/' + org + '/settings/installations/' + install.id + ')'
+        'app "' +
+          entry.name +
+          '" scope mismatch: config wants ' +
+          (wantsAll ? '"all"' : '"selected"') +
+          ' but installation is "' +
+          install.repository_selection +
+          '" — toggle it in the UI first ' +
+          '(github.com/organizations/' +
+          org +
+          '/settings/installations/' +
+          install.id +
+          ')'
       )
     }
 
@@ -2165,7 +2702,12 @@ async function reconcileApps(org, desired, prev, dry) {
       print(dry, 'app-add-repo', `${org}/${entry.name}`, name)
       if (!dry) {
         const repo = JSON.parse(await gh(['api', `repos/${org}/${name}`]))
-        await gh(['api', `user/installations/${install.id}/repositories/${repo.id}`, '--method', 'PUT'])
+        await gh([
+          'api',
+          `user/installations/${install.id}/repositories/${repo.id}`,
+          '--method',
+          'PUT'
+        ])
       }
     }
 
@@ -2175,7 +2717,12 @@ async function reconcileApps(org, desired, prev, dry) {
       if (!dry) {
         const repo = JSON.parse(await gh(['api', `repos/${org}/${name}`]))
         try {
-          await gh(['api', `user/installations/${install.id}/repositories/${repo.id}`, '--method', 'DELETE'])
+          await gh([
+            'api',
+            `user/installations/${install.id}/repositories/${repo.id}`,
+            '--method',
+            'DELETE'
+          ])
         } catch (err) {
           if (!/Not Found/.test(err.message)) throw err
         }
@@ -2189,7 +2736,12 @@ async function reconcileApps(org, desired, prev, dry) {
   for (const entry of prev || []) {
     if (desiredNames.has(entry.name)) continue
     if (!Array.isArray(entry.repos)) {
-      print(dry, 'skip-app', `${org}/${entry.name}`, 'all-repos access can only be changed in the UI')
+      print(
+        dry,
+        'skip-app',
+        `${org}/${entry.name}`,
+        'all-repos access can only be changed in the UI'
+      )
       continue
     }
     const install = bySlug.get(slugify(entry.name))
@@ -2207,7 +2759,12 @@ async function reconcileApps(org, desired, prev, dry) {
           if (!/Not Found/.test(err.message)) throw err
           continue
         }
-        await ghIgnoreNotFound(['api', `user/installations/${install.id}/repositories/${repo.id}`, '--method', 'DELETE'])
+        await ghIgnoreNotFound([
+          'api',
+          `user/installations/${install.id}/repositories/${repo.id}`,
+          '--method',
+          'DELETE'
+        ])
       }
     }
   }
@@ -2221,7 +2778,8 @@ function normalizeRepoApps(apps, where) {
   const slugs = new Set()
   for (const a of apps) {
     const name = typeof a === 'string' ? a : a && a.name
-    if (typeof name !== 'string' || !name) throw new Error('apps on ' + where + ' must be a list of app slugs')
+    if (typeof name !== 'string' || !name)
+      throw new Error('apps on ' + where + ' must be a list of app slugs')
     slugs.add(slugify(name))
   }
   return [...slugs].sort()
@@ -2231,8 +2789,13 @@ function normalizeRepoApps(apps, where) {
 async function orgInstallations(org, opts) {
   if (!opts.installations) opts.installations = new Map()
   if (!opts.installations.has(org)) {
-    const pages = JSON.parse(await gh(['api', `orgs/${org}/installations`, '--paginate', '--slurp']))
-    opts.installations.set(org, new Map(pages.flatMap((p) => p.installations).map((i) => [i.app_slug, i])))
+    const pages = JSON.parse(
+      await gh(['api', `orgs/${org}/installations`, '--paginate', '--slurp'])
+    )
+    opts.installations.set(
+      org,
+      new Map(pages.flatMap((p) => p.installations).map((i) => [i.app_slug, i]))
+    )
   }
   return opts.installations.get(org)
 }
@@ -2250,11 +2813,21 @@ async function reconcileRepoApps(org, name, desired, prev, dry, opts) {
 
   const installs = await orgInstallations(org, opts)
   for (const slug of added) {
-    if (!installs.has(slug)) throw new Error('app "' + slug + '" on ' + target + ' is not installed on ' + org + ' — install it via the UI first')
+    if (!installs.has(slug))
+      throw new Error(
+        'app "' +
+          slug +
+          '" on ' +
+          target +
+          ' is not installed on ' +
+          org +
+          ' — install it via the UI first'
+      )
   }
 
   let repoId = null
-  const id = async () => repoId || (repoId = JSON.parse(await gh(['api', `repos/${org}/${name}`])).id)
+  const id = async () =>
+    repoId || (repoId = JSON.parse(await gh(['api', `repos/${org}/${name}`])).id)
 
   for (const slug of added) {
     const install = installs.get(slug)
@@ -2266,7 +2839,12 @@ async function reconcileRepoApps(org, name, desired, prev, dry, opts) {
     print(dry, 'add-app', target, slug)
     if (dry) continue
     try {
-      await gh(['api', `user/installations/${install.id}/repositories/${await id()}`, '--method', 'PUT'])
+      await gh([
+        'api',
+        `user/installations/${install.id}/repositories/${await id()}`,
+        '--method',
+        'PUT'
+      ])
     } catch (err) {
       throw appAccessError(err, slug, target)
     }
@@ -2279,13 +2857,23 @@ async function reconcileRepoApps(org, name, desired, prev, dry, opts) {
       continue
     }
     if (install.repository_selection === 'all') {
-      print(dry, 'skip-app', target, slug + ' has all-repos access, that can only be changed in the UI')
+      print(
+        dry,
+        'skip-app',
+        target,
+        slug + ' has all-repos access, that can only be changed in the UI'
+      )
       continue
     }
     print(dry, 'remove-app', target, slug)
     if (dry) continue
     try {
-      await gh(['api', `user/installations/${install.id}/repositories/${await id()}`, '--method', 'DELETE'])
+      await gh([
+        'api',
+        `user/installations/${install.id}/repositories/${await id()}`,
+        '--method',
+        'DELETE'
+      ])
     } catch (err) {
       if (/Not Found/.test(err.message)) continue
       throw appAccessError(err, slug, target)
@@ -2298,8 +2886,13 @@ async function reconcileRepoApps(org, name, desired, prev, dry, opts) {
 function appAccessError(err, slug, target) {
   if (!/Not Found|Forbidden|403|not accessible/i.test(err.message)) return err
   return new Error(
-    'could not change access of app "' + slug + '" to ' + target + ': ' + err.message.trim() +
-    '\nthis needs a classic personal access token from the org owner who installed the app, passed as GH_TOKEN. see "GitHub Apps installation scope" in the README'
+    'could not change access of app "' +
+      slug +
+      '" to ' +
+      target +
+      ': ' +
+      err.message.trim() +
+      '\nthis needs a classic personal access token from the org owner who installed the app, passed as GH_TOKEN. see "GitHub Apps installation scope" in the README'
   )
 }
 
@@ -2328,7 +2921,9 @@ async function reconcileTopics(org, name, topics, dry) {
 }
 
 async function reconcileTeams(org, name, desired, prev, dry) {
-  const prevMap = new Map((prev || []).map((t) => [slugify(t.name), PERMISSIONS[t.permission] || t.permission]))
+  const prevMap = new Map(
+    (prev || []).map((t) => [slugify(t.name), PERMISSIONS[t.permission] || t.permission])
+  )
   const desiredMap = new Map(
     desired.map((t) => [slugify(t.name), PERMISSIONS[t.permission] || t.permission])
   )
@@ -2354,7 +2949,12 @@ async function reconcileTeams(org, name, desired, prev, dry) {
         appliedSlugs.add(slug)
       } catch (err) {
         if (/Validation Failed|HTTP 422/i.test(err.message)) {
-          print(dry, 'warn-team', `${org}/${name}`, `${slug} -> ${perm} rejected (unknown permission / custom role?)`)
+          print(
+            dry,
+            'warn-team',
+            `${org}/${name}`,
+            `${slug} -> ${perm} rejected (unknown permission / custom role?)`
+          )
         } else {
           throw err
         }
@@ -2380,7 +2980,9 @@ async function reconcileTeams(org, name, desired, prev, dry) {
 }
 
 async function reconcileCollaborators(org, name, desired, prev, dry) {
-  const prevMap = new Map((prev || []).map((c) => [c.username, PERMISSIONS[c.permission] || c.permission]))
+  const prevMap = new Map(
+    (prev || []).map((c) => [c.username, PERMISSIONS[c.permission] || c.permission])
+  )
   const desiredMap = new Map(
     desired.map((c) => [c.username, PERMISSIONS[c.permission] || c.permission])
   )
@@ -2409,7 +3011,12 @@ async function reconcileCollaborators(org, name, desired, prev, dry) {
         appliedUsernames.add(username)
       } catch (err) {
         if (/Repository has been locked|HTTP 403/i.test(err.message)) {
-          print(dry, 'warn-collaborator', `${org}/${name}`, `${username} -> ${perm} rejected (repo locked or forbidden)`)
+          print(
+            dry,
+            'warn-collaborator',
+            `${org}/${name}`,
+            `${username} -> ${perm} rejected (repo locked or forbidden)`
+          )
         } else {
           throw err
         }
@@ -2453,7 +3060,8 @@ async function reconcileDeployKeys(org, name, desired, prev, dry) {
 
   for (const k of keys) {
     if (!k.title) throw new Error('deployKeys[].title is required for ' + org + '/' + name)
-    if (!k.key) throw new Error('deployKeys[].key is required for ' + org + '/' + name + ' (' + k.title + ')')
+    if (!k.key)
+      throw new Error('deployKeys[].key is required for ' + org + '/' + name + ' (' + k.title + ')')
   }
 
   const desiredMap = new Map(keys.map((k) => [k.title, k]))
@@ -2473,7 +3081,8 @@ async function reconcileDeployKeys(org, name, desired, prev, dry) {
 
     if (dry) {
       if (!was) print(dry, 'deploy-key', `${org}/${name}`, `${title} ${mode}`)
-      else if (!sameDeployKey(k, was)) print(dry, 'deploy-key', `${org}/${name}`, `${title} ${mode}, replaced`)
+      else if (!sameDeployKey(k, was))
+        print(dry, 'deploy-key', `${org}/${name}`, `${title} ${mode}, replaced`)
       applied.push(k)
       continue
     }
@@ -2496,7 +3105,15 @@ async function reconcileDeployKeys(org, name, desired, prev, dry) {
       })
     } catch (err) {
       if (/key is already in use/i.test(err.message)) {
-        throw new Error('deploy key "' + title + '" for ' + org + '/' + name + ' is already attached to another repo, github allows a key on one repo only')
+        throw new Error(
+          'deploy key "' +
+            title +
+            '" for ' +
+            org +
+            '/' +
+            name +
+            ' is already attached to another repo, github allows a key on one repo only'
+        )
       }
       throw err
     }
@@ -2616,7 +3233,9 @@ async function reconcileOrgTeam(org, team, prevTeam, dry) {
 
   if (!team.members || !changed(team.members, prevTeam && prevTeam.members)) return
 
-  const prevMap = new Map((prevTeam && prevTeam.members || []).map((m) => [m.username, m.role || 'member']))
+  const prevMap = new Map(
+    ((prevTeam && prevTeam.members) || []).map((m) => [m.username, m.role || 'member'])
+  )
   const desiredMap = new Map(team.members.map((m) => [m.username, m.role || 'member']))
 
   for (const [username, role] of desiredMap) {
@@ -2675,11 +3294,21 @@ async function getOrgTeamMembers(org, slug) {
 }
 
 async function getDirectTeamMembers(org, slug) {
-  const query = 'query($org: String!, $slug: String!, $cursor: String) { organization(login: $org) { team(slug: $slug) { members(membership: IMMEDIATE, first: 100, after: $cursor) { edges { role node { login } } pageInfo { hasNextPage endCursor } } } } }'
+  const query =
+    'query($org: String!, $slug: String!, $cursor: String) { organization(login: $org) { team(slug: $slug) { members(membership: IMMEDIATE, first: 100, after: $cursor) { edges { role node { login } } pageInfo { hasNextPage endCursor } } } } }'
   const result = []
   let cursor = null
   while (true) {
-    const args = ['api', 'graphql', '-f', `query=${query}`, '-F', `org=${org}`, '-F', `slug=${slug}`]
+    const args = [
+      'api',
+      'graphql',
+      '-f',
+      `query=${query}`,
+      '-F',
+      `org=${org}`,
+      '-F',
+      `slug=${slug}`
+    ]
     if (cursor) args.push('-F', `cursor=${cursor}`)
     const out = await gh(args)
     const data = JSON.parse(out)
@@ -2730,13 +3359,17 @@ async function reconcileBranchProtection(org, name, rule, dry) {
 // branch name patterns (a string or { branch }) and { tag } patterns.
 function deploymentPolicy(value) {
   if (value === undefined || value === null) return { policy: null, patterns: null }
-  if (value === 'protected') return { policy: { protected_branches: true, custom_branch_policies: false }, patterns: null }
-  if (!Array.isArray(value)) throw new Error('deploymentBranches must be "protected" or a list of patterns')
+  if (value === 'protected')
+    return { policy: { protected_branches: true, custom_branch_policies: false }, patterns: null }
+  if (!Array.isArray(value))
+    throw new Error('deploymentBranches must be "protected" or a list of patterns')
   const patterns = value.map((p) => {
     if (typeof p === 'string') return { name: p, type: 'branch' }
     if (p && typeof p.branch === 'string') return { name: p.branch, type: 'branch' }
     if (p && typeof p.tag === 'string') return { name: p.tag, type: 'tag' }
-    throw new Error('deploymentBranches entries must be a string, { "branch": "..." } or { "tag": "..." }')
+    throw new Error(
+      'deploymentBranches entries must be a string, { "branch": "..." } or { "tag": "..." }'
+    )
   })
   return { policy: { protected_branches: false, custom_branch_policies: true }, patterns }
 }
@@ -2779,12 +3412,15 @@ async function reconcileEnvironment(org, repoName, env, dry) {
       currentPreventSelfReview === desiredPreventSelfReview &&
       !changed(currentPolicy, policy) &&
       !changed(currentKeys, desiredKeys)
-    ) return
+    )
+      return
   }
 
   const branches = patterns
     ? patterns.map((p) => (p.type === 'tag' ? 'tag:' + p.name : p.name)).join(',')
-    : policy ? 'protected' : 'all'
+    : policy
+      ? 'protected'
+      : 'all'
 
   print(
     dry,
@@ -2803,7 +3439,11 @@ async function reconcileEnvironment(org, repoName, env, dry) {
   await gh(
     ['api', `repos/${org}/${repoName}/environments/${env.name}`, '--method', 'PUT', '--input', '-'],
     {
-      body: { reviewers, prevent_self_review: desiredPreventSelfReview, deployment_branch_policy: policy }
+      body: {
+        reviewers,
+        prevent_self_review: desiredPreventSelfReview,
+        deployment_branch_policy: policy
+      }
     }
   )
 
@@ -2819,7 +3459,10 @@ async function reconcileEnvironment(org, repoName, env, dry) {
     if (!want.has(patternKey(p))) await gh(['api', `${base}/${p.id}`, '--method', 'DELETE'])
   }
   for (const p of patterns) {
-    if (!have.has(patternKey(p))) await gh(['api', base, '--method', 'POST', '--input', '-'], { body: { name: p.name, type: p.type } })
+    if (!have.has(patternKey(p)))
+      await gh(['api', base, '--method', 'POST', '--input', '-'], {
+        body: { name: p.name, type: p.type }
+      })
   }
 }
 
@@ -2837,10 +3480,20 @@ async function reconcileRulesets(org, repoName, desired, prev, dry) {
       print(dry, 'remove-ruleset', `${org}/${repoName}`, removed.name)
       if (!dry) {
         try {
-          await gh(['api', `repos/${org}/${repoName}/rulesets/${existing.id}`, '--method', 'DELETE'])
+          await gh([
+            'api',
+            `repos/${org}/${repoName}/rulesets/${existing.id}`,
+            '--method',
+            'DELETE'
+          ])
         } catch (err) {
           if (rulesetUnavailable(err)) {
-            print(dry, 'skip-ruleset', `${org}/${repoName}`, removed.name + ' (' + rulesetSkipReason(err) + ')')
+            print(
+              dry,
+              'skip-ruleset',
+              `${org}/${repoName}`,
+              removed.name + ' (' + rulesetSkipReason(err) + ')'
+            )
             continue
           }
           throw err
@@ -2862,7 +3515,9 @@ async function reconcileRulesets(org, repoName, desired, prev, dry) {
 
     try {
       if (existing) {
-        const full = JSON.parse(await gh(['api', `repos/${org}/${repoName}/rulesets/${existing.id}`]))
+        const full = JSON.parse(
+          await gh(['api', `repos/${org}/${repoName}/rulesets/${existing.id}`])
+        )
         if (rulesetMatches(full, body)) {
           appliedNames.add(ruleset.name)
           continue
@@ -2883,14 +3538,22 @@ async function reconcileRulesets(org, repoName, desired, prev, dry) {
       } else {
         print(dry, 'create-ruleset', `${org}/${repoName}`, ruleset.name)
         if (!dry)
-          await gh(['api', `repos/${org}/${repoName}/rulesets`, '--method', 'POST', '--input', '-'], {
-            body
-          })
+          await gh(
+            ['api', `repos/${org}/${repoName}/rulesets`, '--method', 'POST', '--input', '-'],
+            {
+              body
+            }
+          )
       }
       appliedNames.add(ruleset.name)
     } catch (err) {
       if (rulesetUnavailable(err)) {
-        print(dry, 'skip-ruleset', `${org}/${repoName}`, ruleset.name + ' (' + rulesetSkipReason(err) + ')')
+        print(
+          dry,
+          'skip-ruleset',
+          `${org}/${repoName}`,
+          ruleset.name + ' (' + rulesetSkipReason(err) + ')'
+        )
         continue
       }
       throw err
@@ -2911,7 +3574,10 @@ function rulesetSkipReason(err) {
   const msg = err.message || ''
   if (/Upgrade to GitHub|make this repository public/i.test(msg)) return 'plan upgrade required'
   if (/Validation Failed|HTTP 422/i.test(msg)) {
-    const detail = msg.replace(/^.*?Validation Failed[:\-\s]*/i, '').replace(/\s+/g, ' ').trim()
+    const detail = msg
+      .replace(/^.*?Validation Failed[:\-\s]*/i, '')
+      .replace(/\s+/g, ' ')
+      .trim()
     return detail ? '422: ' + detail.slice(0, 200) : '422 validation failed'
   }
   return 'unsupported'
@@ -3012,14 +3678,24 @@ async function buildRulesetBody(org, ruleset) {
 
     if (!MERGE_QUEUE_METHODS.has(mergeMethod)) {
       throw new Error(
-        'ruleset "' + ruleset.name + '": mergeQueue.mergeMethod must be one of ' +
-          [...MERGE_QUEUE_METHODS].join(', ') + ' (got "' + mergeMethod + '")'
+        'ruleset "' +
+          ruleset.name +
+          '": mergeQueue.mergeMethod must be one of ' +
+          [...MERGE_QUEUE_METHODS].join(', ') +
+          ' (got "' +
+          mergeMethod +
+          '")'
       )
     }
     if (!MERGE_QUEUE_GROUPINGS.has(groupingStrategy)) {
       throw new Error(
-        'ruleset "' + ruleset.name + '": mergeQueue.groupingStrategy must be one of ' +
-          [...MERGE_QUEUE_GROUPINGS].join(', ') + ' (got "' + groupingStrategy + '")'
+        'ruleset "' +
+          ruleset.name +
+          '": mergeQueue.groupingStrategy must be one of ' +
+          [...MERGE_QUEUE_GROUPINGS].join(', ') +
+          ' (got "' +
+          groupingStrategy +
+          '")'
       )
     }
     if ((ruleset.target || 'branch') !== 'branch') {
@@ -3100,7 +3776,8 @@ function rulesetMatches(current, desired) {
     if (!cr) return false
     if (dr.parameters) {
       for (const k of Object.keys(dr.parameters)) {
-        if (JSON.stringify(dr.parameters[k]) !== JSON.stringify((cr.parameters || {})[k])) return false
+        if (JSON.stringify(dr.parameters[k]) !== JSON.stringify((cr.parameters || {})[k]))
+          return false
       }
     }
   }
@@ -3134,7 +3811,12 @@ async function getEnvironment(org, name, env) {
 }
 
 async function getDeploymentBranchPolicies(org, name, env) {
-  const res = JSON.parse(await gh(['api', `repos/${org}/${name}/environments/${env}/deployment-branch-policies?per_page=100`]))
+  const res = JSON.parse(
+    await gh([
+      'api',
+      `repos/${org}/${name}/environments/${env}/deployment-branch-policies?per_page=100`
+    ])
+  )
   return res.branch_policies || []
 }
 
@@ -3190,7 +3872,13 @@ async function reconcileNpmBlock(org, repo, prev, dry, done) {
 }
 
 function npmPackageName(npm, repoName) {
-  return npm.package || npm.name || (npm.scope ? (npm.scope.startsWith('@') ? npm.scope : '@' + npm.scope) + '/' + repoName : repoName)
+  return (
+    npm.package ||
+    npm.name ||
+    (npm.scope
+      ? (npm.scope.startsWith('@') ? npm.scope : '@' + npm.scope) + '/' + repoName
+      : repoName)
+  )
 }
 
 function desiredTrustedPublishers(org, repoName, tp, registry = 'npm') {
@@ -3243,7 +3931,12 @@ async function reconcileNpm(org, repoName, npm, dry, trust) {
     return ok
   }
 
-  const { current, created } = await syncTrustedPublishers(pkg, `${org}/${repoName}`, desired, new Set())
+  const { current, created } = await syncTrustedPublishers(
+    pkg,
+    `${org}/${repoName}`,
+    desired,
+    new Set()
+  )
   // a new publisher starts npm's publish-or-expire clock, see reconcileNpmTrust
   trust[pkg] = trackPublishers(current, trust[pkg], created)
 
@@ -3285,7 +3978,10 @@ async function syncTrustedPublishers(pkg, repository, desired, renew) {
 
   const created = new Set(add.map(trustKey))
   // npm hands out the ids, so list again to learn the new ones
-  return { current: created.size ? await listTrustedPublishers(pkg, repository, false) : current, created }
+  return {
+    current: created.size ? await listTrustedPublishers(pkg, repository, false) : current,
+    created
+  }
 }
 
 // only what this entry could have created: GitHub publishers bound to this
@@ -3301,12 +3997,25 @@ async function listTrustedPublishers(pkg, repository, auth) {
 
   // now re-run piped to capture JSON
   const listed = parseTrustList(await npm(['trust', 'list', pkg, '--json']))
-  return listed.filter((c) => c.type === 'github' && typeof c.repository === 'string' && sameName(c.repository, repository))
+  return listed.filter(
+    (c) =>
+      c.type === 'github' && typeof c.repository === 'string' && sameName(c.repository, repository)
+  )
 }
 
 async function addTrustedPublishers(pkg, publishers) {
   for (const d of publishers) {
-    const args = ['trust', 'github', pkg, '--file', d.file, '--repository', d.repository, '--allow-publish', '--yes']
+    const args = [
+      'trust',
+      'github',
+      pkg,
+      '--file',
+      d.file,
+      '--repository',
+      d.repository,
+      '--allow-publish',
+      '--yes'
+    ]
     if (d.environment) args.push('--environment', d.environment)
     await run('npm', args, { interactive: true })
   }
@@ -3372,7 +4081,8 @@ async function checkNpmTrust(pkg, repository, desired, trust, dry, opts) {
 
   // forcing skips the clock: every unconfirmed publisher gets judged by the
   // registry now and recreated unless a publish vouches for it
-  const overdue = (e) => !e.setAt || opts.forceRenew || Date.now() - Date.parse(e.setAt) >= NPM_TRUST_RENEW_AFTER
+  const overdue = (e) =>
+    !e.setAt || opts.forceRenew || Date.now() - Date.parse(e.setAt) >= NPM_TRUST_RENEW_AFTER
   const due = entries.filter((e) => !e.confirmed && overdue(e))
   if (!due.length) return
 
@@ -3394,7 +4104,8 @@ async function checkNpmTrust(pkg, repository, desired, trust, dry, opts) {
   const unknown = due.filter((e) => !e.id)
   if (!single && unknown.length) {
     if (dry) {
-      for (const e of unknown) print(dry, 'npm-trust-check', pkg, publisherLabel(e) + ': id unknown, resolved on apply')
+      for (const e of unknown)
+        print(dry, 'npm-trust-check', pkg, publisherLabel(e) + ': id unknown, resolved on apply')
       return
     }
     const current = await listTrustedPublishers(pkg, repository, true)
@@ -3414,7 +4125,12 @@ async function checkNpmTrust(pkg, repository, desired, trust, dry, opts) {
     const since = e.setAt ? Date.parse(e.setAt) - NPM_TRUST_CLOCK_SLACK : 0
     const proof = publishes.filter((p) => p.time >= since && (single || p.id === e.id))
     if (proof.length) {
-      print(dry, 'npm-trust-confirmed', pkg, publisherLabel(e) + ': trusted publish ' + (e.setAt ? 'after ' + e.setAt : 'found'))
+      print(
+        dry,
+        'npm-trust-confirmed',
+        pkg,
+        publisherLabel(e) + ': trusted publish ' + (e.setAt ? 'after ' + e.setAt : 'found')
+      )
       // the publisher existed by its first publish, so a clock that was never
       // recorded starts there and the confirmation stays re-derivable
       if (!e.setAt) e.setAt = new Date(Math.min(...proof.map((p) => p.time))).toISOString()
@@ -3423,9 +4139,20 @@ async function checkNpmTrust(pkg, repository, desired, trust, dry, opts) {
       print(dry, 'npm-trust-track', pkg, publisherLabel(e) + ': no trusted publish yet')
       e.setAt = now
     } else if (opts.renew === false) {
-      print(dry, 'npm-trust-expired', pkg, publisherLabel(e) + ': set ' + e.setAt + ', not renewing')
+      print(
+        dry,
+        'npm-trust-expired',
+        pkg,
+        publisherLabel(e) + ': set ' + e.setAt + ', not renewing'
+      )
     } else {
-      print(dry, 'npm-trust-renew', pkg, publisherLabel(e) + (e.setAt ? ': no trusted publish since ' + e.setAt : ': no trusted publish, forced'))
+      print(
+        dry,
+        'npm-trust-renew',
+        pkg,
+        publisherLabel(e) +
+          (e.setAt ? ': no trusted publish since ' + e.setAt : ': no trusted publish, forced')
+      )
       renew.add(trustKey(e))
     }
   }
@@ -3435,9 +4162,19 @@ async function checkNpmTrust(pkg, repository, desired, trust, dry, opts) {
   // a publish since the oldest clock that none of our ids account for means
   // the ids do not line up, or someone else publishes here. say so rather
   // than renew in silence
-  const oldest = Math.min(...due.filter((e) => renew.has(trustKey(e))).map((e) => (e.setAt ? Date.parse(e.setAt) : 0)))
-  const foreign = publishes.filter((p) => p.time >= oldest - NPM_TRUST_CLOCK_SLACK && !entries.some((e) => e.id === p.id))
-  if (foreign.length) print(dry, 'npm-trust-unmatched', pkg, foreign.length + ' trusted publish(es) from a publisher this repo does not track')
+  const oldest = Math.min(
+    ...due.filter((e) => renew.has(trustKey(e))).map((e) => (e.setAt ? Date.parse(e.setAt) : 0))
+  )
+  const foreign = publishes.filter(
+    (p) => p.time >= oldest - NPM_TRUST_CLOCK_SLACK && !entries.some((e) => e.id === p.id)
+  )
+  if (foreign.length)
+    print(
+      dry,
+      'npm-trust-unmatched',
+      pkg,
+      foreign.length + ' trusted publish(es) from a publisher this repo does not track'
+    )
 
   if (dry) return
 
@@ -3468,9 +4205,16 @@ function listNpmTrust(config, statePath) {
       if (!desired.length) continue
       const pkg = npmPackageName(npm, repo.name)
       for (const e of trackPublishers(desired, trust[pkg])) {
-        const entry = { repo: config.org + '/' + repo.name, archived: repo.archived === true, deprecated: !!npm.deprecated, pkg, ...e }
+        const entry = {
+          repo: config.org + '/' + repo.name,
+          archived: repo.archived === true,
+          deprecated: !!npm.deprecated,
+          pkg,
+          ...e
+        }
         // when an apply starts asking the registry about it
-        if (e.setAt && !e.confirmed) entry.dueAt = new Date(Date.parse(e.setAt) + NPM_TRUST_RENEW_AFTER).toISOString()
+        if (e.setAt && !e.confirmed)
+          entry.dueAt = new Date(Date.parse(e.setAt) + NPM_TRUST_RENEW_AFTER).toISOString()
         out.push(entry)
       }
     }
@@ -3497,7 +4241,8 @@ function trackPublishers(publishers, previous, created = new Set()) {
   const now = new Date().toISOString()
 
   return publishers.map((p) => {
-    const was = known.find((k) => p.id && k.id === p.id) || known.find((k) => trustKey(k) === trustKey(p))
+    const was =
+      known.find((k) => p.id && k.id === p.id) || known.find((k) => trustKey(k) === trustKey(p))
     const clock = created.has(trustKey(p)) ? { setAt: now } : was || legacy
     const entry = {}
     if (p.id || (was && was.id)) entry.id = publisherId(p.id || was.id)
@@ -3533,7 +4278,10 @@ function trustedPublishes(packument) {
     const trusted = data._npmUser && data._npmUser.trustedPublisher
     const att = data.dist && data.dist.attestations
     if (!trusted && !(att && att.provenance)) continue
-    publishes.push({ id: publisherId(trusted && trusted.oidcConfigId), time: Date.parse(time[version]) })
+    publishes.push({
+      id: publisherId(trusted && trusted.oidcConfigId),
+      time: Date.parse(time[version])
+    })
   }
   return publishes
 }
@@ -3666,10 +4414,18 @@ async function reconcileNpmMaintainers(pkg, desired, dry) {
     if (currentSet.has(user)) continue
     print(dry, 'npm-add-owner', pkg, user)
     if (!dry) {
-      const res = await run('npm', ['owner', 'add', user, pkg], { interactive: true, allowFailure: true })
+      const res = await run('npm', ['owner', 'add', user, pkg], {
+        interactive: true,
+        allowFailure: true
+      })
       if (res.code !== 0) {
         ok = false
-        print(dry, 'warn-maintainers', pkg, 'npm owner add ' + user + ' failed - is the caller an existing owner?')
+        print(
+          dry,
+          'warn-maintainers',
+          pkg,
+          'npm owner add ' + user + ' failed - is the caller an existing owner?'
+        )
       }
     }
   }
@@ -3682,7 +4438,10 @@ async function reconcileNpmMaintainers(pkg, desired, dry) {
     }
     print(dry, 'npm-remove-owner', pkg, user)
     if (!dry) {
-      const res = await run('npm', ['owner', 'rm', user, pkg], { interactive: true, allowFailure: true })
+      const res = await run('npm', ['owner', 'rm', user, pkg], {
+        interactive: true,
+        allowFailure: true
+      })
       if (res.code !== 0) {
         ok = false
         print(dry, 'warn-maintainers', pkg, 'npm owner rm ' + user + ' failed')
@@ -3694,7 +4453,7 @@ async function reconcileNpmMaintainers(pkg, desired, dry) {
 }
 
 async function reconcileNpmDeprecation(pkg, deprecated, dry) {
-  const message = deprecated === true ? 'This package is deprecated' : (deprecated || '')
+  const message = deprecated === true ? 'This package is deprecated' : deprecated || ''
 
   const res = await npm(['view', pkg, 'deprecated', '--json'], { allowFailure: true })
   if (res.code !== 0) {
@@ -3782,7 +4541,9 @@ async function reconcileNuget(org, repoName, nuget, dry) {
   }
 
   if (dry || !process.stdin.isTTY) return
-  await confirm('Press enter once the trusted publishing policy is configured on NuGet, ctrl-c to abort')
+  await confirm(
+    'Press enter once the trusted publishing policy is configured on NuGet, ctrl-c to abort'
+  )
 }
 
 // pub.dev has no API to enable automated publishing (web UI only), and only
@@ -3801,7 +4562,9 @@ async function reconcilePubDev(org, repoName, pubDev, dry) {
     '    Repository:   ' + org + '/' + repoName,
     '    Tag pattern:  ' + (tp.tagPattern || 'v{{version}}'),
     '    Environment:  ' + (tp.environment || '(none)'),
-    '    Admin:        https://pub.dev/packages/' + pkg + '/admin (publish the first version by hand if the package does not exist)'
+    '    Admin:        https://pub.dev/packages/' +
+      pkg +
+      '/admin (publish the first version by hand if the package does not exist)'
   ]
   for (const line of lines) {
     console.log(line)
@@ -3872,7 +4635,8 @@ async function ensureCrate(org, repo, krate, dry) {
   if (dry) return
 
   // crates.io rejects a crate without a description or license
-  if (!krate.license) throw new Error('crates.license is required to publish the placeholder of ' + name)
+  if (!krate.license)
+    throw new Error('crates.license is required to publish the placeholder of ' + name)
 
   const manifest = [
     '[package]',
@@ -3907,7 +4671,11 @@ async function reconcileCratePublishers(name, org, repoName, desired, dry) {
   }
 
   const token = cratesToken()
-  const res = await cratesApi('GET', '/trusted_publishing/github_configs?crate=' + encodeURIComponent(name), token)
+  const res = await cratesApi(
+    'GET',
+    '/trusted_publishing/github_configs?crate=' + encodeURIComponent(name),
+    token
+  )
   const listed = res.github_configs
     .filter((c) => sameName(c.repository_owner, org) && sameName(c.repository_name, repoName))
     .map((c) => ({ id: c.id, file: c.workflow_filename, environment: c.environment || null }))
@@ -3978,7 +4746,9 @@ async function cratesApi(method, pathname, token, body) {
     try {
       detail = (await res.json()).errors.map((e) => e.detail).join(', ')
     } catch {}
-    throw new Error('crates.io ' + method + ' ' + pathname + ' failed with ' + res.status + ': ' + detail)
+    throw new Error(
+      'crates.io ' + method + ' ' + pathname + ' failed with ' + res.status + ': ' + detail
+    )
   }
 
   return res.status === 204 ? null : res.json()
@@ -4014,12 +4784,32 @@ async function githubRename(org, from, to, dry) {
   const targetTaken = target !== null && sameName(target.name, to)
 
   if (!source || !sameName(source.name, from)) {
-    if (source) throw new Error(org + '/' + from + ' now lives at ' + org + '/' + source.name + ', refusing to rename it to ' + to)
+    if (source)
+      throw new Error(
+        org +
+          '/' +
+          from +
+          ' now lives at ' +
+          org +
+          '/' +
+          source.name +
+          ', refusing to rename it to ' +
+          to
+      )
     return targetTaken ? 'already' : 'missing'
   }
 
   if (targetTaken) {
-    throw new Error(org + '/' + to + ' already exists. If it is an empty leftover from a mistaken apply, delete it with `gh repo delete ' + org + '/' + to + '` and rerun')
+    throw new Error(
+      org +
+        '/' +
+        to +
+        ' already exists. If it is an empty leftover from a mistaken apply, delete it with `gh repo delete ' +
+        org +
+        '/' +
+        to +
+        '` and rerun'
+    )
   }
 
   print(dry, 'rename-repo', org, from + ' -> ' + to)
@@ -4081,12 +4871,22 @@ async function ensureRepo(org, repo, prev, dry, done) {
       if (branches.length === 0) {
         print(dry, 'init-readme', `${org}/${repo.name}`)
         if (!dry) {
-          await gh(['api', `repos/${org}/${repo.name}/contents/README.md`, '--method', 'PUT', '--input', '-'], {
-            body: {
-              message: 'Initial commit',
-              content: Buffer.from('# ' + repo.name + '\n').toString('base64')
+          await gh(
+            [
+              'api',
+              `repos/${org}/${repo.name}/contents/README.md`,
+              '--method',
+              'PUT',
+              '--input',
+              '-'
+            ],
+            {
+              body: {
+                message: 'Initial commit',
+                content: Buffer.from('# ' + repo.name + '\n').toString('base64')
+              }
             }
-          })
+          )
         }
         initialized = true
       }
@@ -4133,9 +4933,19 @@ async function renameInitialBranch(org, repo, dry) {
   if (from === repo.defaultBranch) return
 
   print(dry, 'rename-branch', `${org}/${repo.name}`, from + ' -> ' + repo.defaultBranch)
-  await gh(['api', `repos/${org}/${repo.name}/branches/${from}/rename`, '--method', 'POST', '--input', '-'], {
-    body: { new_name: repo.defaultBranch }
-  })
+  await gh(
+    [
+      'api',
+      `repos/${org}/${repo.name}/branches/${from}/rename`,
+      '--method',
+      'POST',
+      '--input',
+      '-'
+    ],
+    {
+      body: { new_name: repo.defaultBranch }
+    }
+  )
 }
 
 function parseSecretsFile(filePath) {
@@ -4175,7 +4985,7 @@ async function reconcileSecrets(org, name, names, prevNames, dry, envName, opts)
   const desired = normalizeSecretNames(names)
   const prev = prevNames || []
   const target = `${org}/${name}`
-  const label = (envName ? envName + '/' : '')
+  const label = envName ? envName + '/' : ''
   const next = []
 
   for (const key of desired) {
@@ -4227,7 +5037,12 @@ async function reconcileOrgSecrets(org, desired, prev, dry, opts) {
         if (had) applied[name] = had
         continue
       }
-      print(dry, 'set-org-secret', org, name + ' ' + want.visibility + (want.repos ? ' ' + want.repos.join(',') : ''))
+      print(
+        dry,
+        'set-org-secret',
+        org,
+        name + ' ' + want.visibility + (want.repos ? ' ' + want.repos.join(',') : '')
+      )
       if (!dry) {
         const args = ['secret', 'set', name, '--org', org, '--visibility', want.visibility]
         if (want.repos) args.push('--repos', want.repos.join(','))
@@ -4237,10 +5052,21 @@ async function reconcileOrgSecrets(org, desired, prev, dry, opts) {
       print(dry, 'org-secret-repos', org, name + ' ' + want.repos.join(','))
       if (!dry) {
         const ids = []
-        for (const repoName of want.repos) ids.push(JSON.parse(await gh(['api', `repos/${org}/${repoName}`])).id)
-        await gh(['api', `orgs/${org}/actions/secrets/${name}/repositories`, '--method', 'PUT', '--input', '-'], {
-          body: { selected_repository_ids: ids }
-        })
+        for (const repoName of want.repos)
+          ids.push(JSON.parse(await gh(['api', `repos/${org}/${repoName}`])).id)
+        await gh(
+          [
+            'api',
+            `orgs/${org}/actions/secrets/${name}/repositories`,
+            '--method',
+            'PUT',
+            '--input',
+            '-'
+          ],
+          {
+            body: { selected_repository_ids: ids }
+          }
+        )
       }
     }
     applied[name] = want
@@ -4256,8 +5082,13 @@ async function reconcileOrgSecrets(org, desired, prev, dry, opts) {
 }
 
 async function listOrgSecretRepos(org, name) {
-  const pages = JSON.parse(await gh(['api', `orgs/${org}/actions/secrets/${name}/repositories`, '--paginate', '--slurp']))
-  return pages.flatMap((p) => p.repositories).map((r) => r.name).sort()
+  const pages = JSON.parse(
+    await gh(['api', `orgs/${org}/actions/secrets/${name}/repositories`, '--paginate', '--slurp'])
+  )
+  return pages
+    .flatMap((p) => p.repositories)
+    .map((r) => r.name)
+    .sort()
 }
 
 async function ghIgnoreNotFound(args) {
@@ -4322,15 +5153,35 @@ function readSecret(name) {
       let i = 0
       while (i < chunk.length) {
         const rest = chunk.slice(i, i + PASTE_START.length)
-        if (rest === PASTE_START) { pasting = true; i += rest.length; continue }
-        if (rest === PASTE_END) { pasting = false; i += rest.length; continue }
+        if (rest === PASTE_START) {
+          pasting = true
+          i += rest.length
+          continue
+        }
+        if (rest === PASTE_END) {
+          pasting = false
+          i += rest.length
+          continue
+        }
         // a paste marker split across two chunks, wait for the rest
-        if (rest.length < PASTE_START.length && (PASTE_START.startsWith(rest) || PASTE_END.startsWith(rest))) { pending = rest; break }
+        if (
+          rest.length < PASTE_START.length &&
+          (PASTE_START.startsWith(rest) || PASTE_END.startsWith(rest))
+        ) {
+          pending = rest
+          break
+        }
         const c = chunk[i++]
-        if (pasting) { buf += c; continue }
+        if (pasting) {
+          buf += c
+          continue
+        }
         if (c === '\x03') return finish(new Error('aborted'))
         if (c === '\x04' || c === '\r' || c === '\n') return finish()
-        if (c === '\x7f' || c === '\b') { buf = buf.slice(0, -1); continue }
+        if (c === '\x7f' || c === '\b') {
+          buf = buf.slice(0, -1)
+          continue
+        }
         if (c === '\x1b') continue
         buf += c
       }
@@ -4393,7 +5244,9 @@ async function gh(args, opts) {
       return await run('gh', args, opts)
     } catch (err) {
       if (attempt >= LOCKED_RETRIES || !/Repository has been locked/.test(err.message)) throw err
-      console.log(`repository locked, retrying in ${LOCKED_WAIT / 1000}s (${attempt + 1}/${LOCKED_RETRIES})...`)
+      console.log(
+        `repository locked, retrying in ${LOCKED_WAIT / 1000}s (${attempt + 1}/${LOCKED_RETRIES})...`
+      )
       await new Promise((resolve) => setTimeout(resolve, LOCKED_WAIT))
     }
   }
@@ -4404,14 +5257,20 @@ async function gh(args, opts) {
 // on the tty for npm to prompt again, then piped once more for its output
 async function npm(args, opts = {}) {
   let res = await run('npm', args, { ...opts, allowFailure: true })
-  if (res.code !== 0 && process.stdin.isTTY && /E401|EOTP|ENEEDAUTH|401 Unauthorized/.test(res.stderr + res.stdout)) {
+  if (
+    res.code !== 0 &&
+    process.stdin.isTTY &&
+    /E401|EOTP|ENEEDAUTH|401 Unauthorized/.test(res.stderr + res.stdout)
+  ) {
     console.log('  npm session expired, authenticating again')
     await run('npm', args, { ...opts, interactive: true })
     res = await run('npm', args, { ...opts, allowFailure: true })
   }
   if (opts.allowFailure) return res
   if (res.code === 0) return res.stdout
-  throw new Error([res.stderr, res.stdout].filter(Boolean).join(' | ') || 'npm exited with code ' + res.code)
+  throw new Error(
+    [res.stderr, res.stdout].filter(Boolean).join(' | ') || 'npm exited with code ' + res.code
+  )
 }
 
 // view reads the public registry, everything else needs a session. checked

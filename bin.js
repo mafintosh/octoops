@@ -2,7 +2,19 @@
 
 const { command, summary, flag, arg } = require('paparam')
 const path = require('path')
-const { apply, importOrg, seed, filter, resync, lint, preview, loadConfig, renameRepo, expandIncludes, listNpmTrust } = require('.')
+const {
+  apply,
+  importOrg,
+  seed,
+  filter,
+  resync,
+  lint,
+  preview,
+  loadConfig,
+  renameRepo,
+  expandIncludes,
+  listNpmTrust
+} = require('.')
 
 const applyCmd = command(
   'apply',
@@ -11,7 +23,10 @@ const applyCmd = command(
   flag('--audit', 'Write an audit log to audits/<timestamp>.log'),
   flag('--enterprise', 'Enable enterprise features (env reviewers on private repos)'),
   flag('--no-renew', 'Do not recreate expired npm trusted publishers'),
-  flag('--force-renew', 'Recreate every npm trusted publisher the registry has not confirmed, without waiting for the clock'),
+  flag(
+    '--force-renew',
+    'Recreate every npm trusted publisher the registry has not confirmed, without waiting for the clock'
+  ),
   flag('--invalidate [names]', 'Comma-separated secret names to prompt for and set again'),
   arg('<config>', 'Path to config JSON file or manifest with "includes"'),
   async function () {
@@ -19,7 +34,8 @@ const applyCmd = command(
     const paths = expandIncludes(root)
     const isManifest = paths.length !== 1 || paths[0] !== root
     for (const configPath of paths) {
-      if (isManifest) console.log('\n=== applying ' + path.relative(process.cwd(), configPath) + ' ===\n')
+      if (isManifest)
+        console.log('\n=== applying ' + path.relative(process.cwd(), configPath) + ' ===\n')
       const config = loadConfig(configPath)
       const statePath = configPath.replace(/\.json$/, '.state.json')
       await apply(config, {
@@ -47,7 +63,8 @@ const importCmd = command(
     const opts = {}
     if (importCmd.flags.only) opts.only = importCmd.flags.only.split(',')
     if (importCmd.flags.repos) {
-      opts.repos = require('fs').readFileSync(path.resolve(importCmd.flags.repos), 'utf8')
+      opts.repos = require('fs')
+        .readFileSync(path.resolve(importCmd.flags.repos), 'utf8')
         .split('\n')
         .map((s) => s.trim())
         .filter((s) => s && !s.startsWith('#'))
@@ -94,11 +111,19 @@ const lintCmd = command(
   arg('<config>', 'Path to config JSON file or manifest with "includes"'),
   function () {
     const problems = lint(path.resolve(lintCmd.args.config))
-    for (const p of problems) console.error(path.relative(process.cwd(), p.file) + ': ' + p.level + ': ' + p.message)
+    for (const p of problems)
+      console.error(path.relative(process.cwd(), p.file) + ': ' + p.level + ': ' + p.message)
     const errors = problems.filter((p) => p.level === 'error').length
     const warnings = problems.length - errors
     if (errors) process.exitCode = 1
-    console.log(problems.length ? errors + (errors === 1 ? ' error, ' : ' errors, ') + warnings + (warnings === 1 ? ' warning' : ' warnings') : 'ok')
+    console.log(
+      problems.length
+        ? errors +
+            (errors === 1 ? ' error, ' : ' errors, ') +
+            warnings +
+            (warnings === 1 ? ' warning' : ' warnings')
+        : 'ok'
+    )
   }
 )
 
@@ -116,7 +141,8 @@ const previewCmd = command(
       return
     }
     // where each entry came from goes to stderr so stdout stays plain JSON
-    for (const f of found) console.error(f.org + '/' + f.repo.name + ' from ' + path.relative(process.cwd(), f.file))
+    for (const f of found)
+      console.error(f.org + '/' + f.repo.name + ' from ' + path.relative(process.cwd(), f.file))
     const repos = found.map((f) => f.repo)
     console.log(JSON.stringify(name && repos.length === 1 ? repos[0] : repos, null, 2))
   }
@@ -142,7 +168,9 @@ const renameCmd = command(
   flag('--dry-run|-n', 'Show what would change without making changes'),
   async function () {
     const configPath = path.resolve(renameCmd.args.config)
-    await renameRepo(configPath, renameCmd.args.from, renameCmd.args.to, { dry: renameCmd.flags.dryRun })
+    await renameRepo(configPath, renameCmd.args.from, renameCmd.args.to, {
+      dry: renameCmd.flags.dryRun
+    })
   }
 )
 
@@ -159,7 +187,8 @@ const filterCmd = command(
     const config = loadConfig(configPath)
     const opts = {}
     if (filterCmd.flags.repos) {
-      opts.repos = require('fs').readFileSync(path.resolve(filterCmd.flags.repos), 'utf8')
+      opts.repos = require('fs')
+        .readFileSync(path.resolve(filterCmd.flags.repos), 'utf8')
         .split('\n')
         .map((s) => s.trim())
         .filter((s) => s && !s.startsWith('#'))
@@ -198,7 +227,10 @@ const npmTrustCmd = command(
         else if (!e.setAt) status = 'unconfirmed, not tracked yet, checked on next apply'
         else {
           const left = Date.parse(e.dueAt) - Date.now()
-          status = 'unconfirmed, set ' + e.setAt + (left > 0 ? ', checked in ' + hours(left) : ', due for check')
+          status =
+            'unconfirmed, set ' +
+            e.setAt +
+            (left > 0 ? ', checked in ' + hours(left) : ', due for check')
         }
         console.log(e.repo + ' ' + e.pkg + ' ' + where + ': ' + status)
       }
