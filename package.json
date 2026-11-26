@@ -11,7 +11,9 @@
     "lint": "prettier --check ."
   },
   "dependencies": {
-    "paparam": "^1.10.1"
+    "paparam": "^1.10.1",
+    "semver": "^7.7.2",
+    "validate-npm-package-name": "^6.0.0"
   },
   "devDependencies": {
     "prettier": "^3.6.2",

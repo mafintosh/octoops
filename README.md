@@ -999,6 +999,19 @@ You can also deprecate a package:
 
 Like every other field, deprecation is only reconciled when the `npm` block differs from recorded state — a matching re-apply does nothing. When it does run, octoops checks the live registry first and only calls `npm deprecate` if the current message actually differs (`npm-deprecate` / `npm-undeprecate` log lines). If the package isn't on npm yet you'll see a `skip-deprecate` line.
 
+For an install warning on a single published release, use `deprecatedVersions`.
+
+```json
+{
+  "package": "@my-org/my-module",
+  "deprecatedVersions": {
+    "1.2.3": "Missing build files. Use 1.2.4."
+  }
+}
+```
+
+Each key is an exact published version (including prereleases). Ranges, tags and build metadata are rejected. Set a version's message to `""` to clear it. Removing an entry leaves its registry message in place. Use either `deprecated` or `deprecatedVersions` on a package. A missing version fails the apply so it can be retried after publication.
+
 This also works on **archived** repos: the npm registry is independent of GitHub's archive flag, so octoops still reconciles deprecation (and other npm state) even when `archived: true` — deprecating a package while archiving its repo is the common case.
 
 ### PyPI trusted publishing (OIDC)
