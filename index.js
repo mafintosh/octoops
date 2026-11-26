@@ -2,6 +2,8 @@ const { spawn } = require('child_process')
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
+const validVersion = require('semver/functions/valid')
+const validatePackageName = require('validate-npm-package-name')
 
 const PERMISSIONS = {
   read: 'pull',
@@ -740,6 +742,22 @@ async function apply(config, opts = {}) {
 
       const prev = state[key] || {}
       const done = {}
+      // Seed and older releases can copy an npm block without applying its
+      // version warnings. Only record this map after the registry work succeeds.
+      const versions = npmVersionDeprecations(repo)
+      const applied = prev.npmDeprecatedVersions || {}
+      if (changed(versions, applied)) {
+        // A failure after the first write can leave both the old and new maps
+        // inaccurate. Make the next apply check the registry in that case.
+        if (!dry && prev.npmDeprecatedVersions) {
+          delete prev.npmDeprecatedVersions
+          if (opts.statePath) saveState(opts.statePath, state)
+        }
+        for (const [spec, message] of Object.entries(versions)) {
+          if (applied[spec] !== message) await reconcileNpmDeprecation(spec, message, dry, true)
+        }
+        done.npmDeprecatedVersions = versions
+      }
       try {
         await reconcile(config.org, repo, prev, dry, done, opts)
         await reconcileNpmTrust(config.org, repo, prev, dry, done, opts)
@@ -1071,9 +1089,11 @@ function validateConfig(config, warn = warnStderr) {
     }
     validateSecretNames(raw.secrets, 'repo "' + (raw.name || '?') + '"')
     if (raw.deleted !== true) {
+      const resolved = resolve(resolveDefaults(raw, config.defaults), config.presets || {})
+      npmVersionDeprecations(resolved)
       // apps can arrive through a defaults pack, so check the merged entry
       const where = 'repo "' + (raw.name || '?') + '"'
-      for (const slug of normalizeRepoApps(resolveDefaults(raw, config.defaults).apps, where)) {
+      for (const slug of normalizeRepoApps(resolved.apps, where)) {
         if (rootApps.has(slug)) throw new Error('app "' + slug + '" is declared both in the root "apps" list and on ' + where + ', pick one place or they undo each other')
       }
     }
@@ -3169,7 +3189,11 @@ async function reconcileNpmBlock(org, repo, prev, dry, done) {
     for (const npm of npms) {
       const pkg = npmPackageName(npm, repo.name)
       const was = prevs.find((p) => npmPackageName(p, repo.name) === pkg)
-      if (was && !changed(npm, was)) continue
+      if (was) {
+        const { deprecatedVersions, ...settings } = npm
+        const { deprecatedVersions: previousVersions, ...previousSettings } = was
+        if (!changed(settings, previousSettings)) continue
+      }
       await reconcileNpm(org, repo.name, npm, dry, trust)
     }
     // a package gone from the config keeps nothing an apply set up for it.
@@ -3191,6 +3215,34 @@ async function reconcileNpmBlock(org, repo, prev, dry, done) {
 
 function npmPackageName(npm, repoName) {
   return npm.package || npm.name || (npm.scope ? (npm.scope.startsWith('@') ? npm.scope : '@' + npm.scope) + '/' + repoName : repoName)
+}
+
+function npmVersionDeprecations(repo) {
+  const versions = {}
+  const packages = [].concat(repo.npm || [])
+  for (const entry of packages) {
+    if (entry.deprecatedVersions === undefined) continue
+    const pkg = npmPackageName(entry, repo.name)
+    const messages = entry.deprecatedVersions
+    if (typeof pkg !== 'string' || !validatePackageName(pkg).validForOldPackages || pkg.startsWith('-')) {
+      throw new Error('deprecatedVersions requires a registry package name')
+    }
+    if (!messages || typeof messages !== 'object' || Array.isArray(messages)) {
+      throw new Error('deprecatedVersions on ' + pkg + ' must map exact versions to messages')
+    }
+    if (packages.some((other) => npmPackageName(other, repo.name) === pkg && other.deprecated !== undefined)) {
+      throw new Error('use either deprecated or deprecatedVersions for ' + pkg)
+    }
+    for (const [version, message] of Object.entries(messages)) {
+      if (validVersion(version) !== version || typeof message !== 'string') {
+        throw new Error('expected an exact version and a string message for ' + pkg + '@' + version)
+      }
+      const spec = pkg + '@' + version
+      if (Object.hasOwn(versions, spec)) throw new Error('duplicate deprecation for ' + spec)
+      versions[spec] = message
+    }
+  }
+  return versions
 }
 
 function desiredTrustedPublishers(org, repoName, tp, registry = 'npm') {
@@ -3693,12 +3745,12 @@ async function reconcileNpmMaintainers(pkg, desired, dry) {
   return ok
 }
 
-async function reconcileNpmDeprecation(pkg, deprecated, dry) {
+async function reconcileNpmDeprecation(pkg, deprecated, dry, exact = false) {
   const message = deprecated === true ? 'This package is deprecated' : (deprecated || '')
 
   const res = await npm(['view', pkg, 'deprecated', '--json'], { allowFailure: true })
   if (res.code !== 0) {
-    if (/404|E404|not found/i.test(res.stderr)) {
+    if (!exact && /404|E404|not found/i.test(res.stderr)) {
       print(dry, 'skip-deprecate', pkg, 'package not on npm yet, will sync on next apply')
       return
     }
@@ -3716,7 +3768,7 @@ async function reconcileNpmDeprecation(pkg, deprecated, dry) {
   print(dry, message ? 'npm-deprecate' : 'npm-undeprecate', pkg, message || 'clear deprecation')
   if (dry) return
 
-  await run('npm', ['deprecate', pkg, message], { interactive: true })
+  await run('npm', ['deprecate', '--', pkg, message], { interactive: true })
 }
 
 // PyPI has no token/CLI to create trusted publishers (browser-only), so octoops
