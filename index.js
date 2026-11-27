@@ -4560,27 +4560,65 @@ function validateNpmDeprecated(npm, where) {
   }
 }
 
+// a write, so it runs on the tty like every other npm write: npm prompts for a
+// one-time password there. a piped run cannot prompt and would be retried
+// piped once more after the prompt, writing twice and failing on the second
+// one-time password
+async function npmDeprecate(spec, message) {
+  await run('npm', ['deprecate', spec, message], { interactive: true })
+}
+
+// every version's deprecation message ("" when it has none), or null when the
+// package does not exist. read through the npm cli rather than a bare registry
+// fetch, so restricted packages and a configured registry are read with the
+// caller's login. a range like * leaves prereleases out, so those are listed
+// by their exact version next to it
+async function npmVersionDeprecations(pkg) {
+  const versions = await npmViewJson(pkg, ['versions'])
+  if (versions === null) return null
+  const all = [].concat(versions || [])
+  const current = {}
+  if (!all.length) return current
+  const range = ['>=0.0.0', ...all.filter((v) => v.includes('-'))].join(' || ')
+  const rows = await npmViewJson(pkg + '@' + range, ['version', 'deprecated'])
+  // one row per version: a bare version string when it has no deprecation,
+  // { version, deprecated } when it has one, and no list for a single match
+  for (const row of [].concat(rows || [])) {
+    if (typeof row === 'string') current[row] = ''
+    else if (row && row.version) current[row.version] = row.deprecated || ''
+  }
+  // a version the range query did not return reads as not deprecated rather
+  // than not published
+  for (const v of all) if (current[v] === undefined) current[v] = ''
+  return current
+}
+
+// npm view --json, null when the package does not exist
+async function npmViewJson(spec, fields) {
+  const res = await npm(['view', spec, ...fields, '--json'], { allowFailure: true })
+  if (res.code !== 0) {
+    if (/E404|404 Not Found/.test(res.stderr + res.stdout)) return null
+    throw new Error('npm view ' + spec + ' failed: ' + (res.stderr || res.stdout).trim())
+  }
+  return res.stdout && res.stdout.trim() ? JSON.parse(res.stdout) : undefined
+}
+
 // returns the declared versions that could not be synced yet, or null when the
 // registry could not be read and nothing was synced at all
 async function reconcileNpmDeprecation(pkg, dep, was, dry) {
-  let packument
+  // the registry has no package-level deprecation, only a message per version.
+  // kept up to date as commands run, each check sees what the last one did
+  let current
   try {
-    packument = await fetchPackument(pkg)
+    current = await npmVersionDeprecations(pkg)
   } catch (err) {
     // a registry hiccup is no reason to guess, the next apply looks again
     print(dry, 'deprecate-skip', pkg, 'could not read registry: ' + err.message)
     return null
   }
-  if (!packument) {
+  if (!current) {
     print(dry, 'skip-deprecate', pkg, 'package not on npm yet, will sync on next apply')
     return null
-  }
-
-  // the registry has no package-level deprecation, only a message per version.
-  // kept up to date as commands run, each check sees what the last one did
-  const current = {}
-  for (const [version, data] of Object.entries(packument.versions || {})) {
-    current[version] = (data && data.deprecated) || ''
   }
   const published = (version) => Object.prototype.hasOwnProperty.call(current, version)
   const declared = (version) => Object.prototype.hasOwnProperty.call(dep.versions, version)
@@ -4597,7 +4635,7 @@ async function reconcileNpmDeprecation(pkg, dep, was, dry) {
         pkg,
         dep.others || 'clear deprecation'
       )
-      if (!dry) await npm(['deprecate', pkg, dep.others])
+      if (!dry) await npmDeprecate(pkg, dep.others)
       for (const version of Object.keys(current)) current[version] = dep.others
     }
   }
@@ -4622,7 +4660,7 @@ async function reconcileNpmDeprecation(pkg, dep, was, dry) {
       pkg + '@' + version,
       message || 'clear deprecation'
     )
-    if (!dry) await npm(['deprecate', pkg + '@' + version, message])
+    if (!dry) await npmDeprecate(pkg + '@' + version, message)
     current[version] = message
   }
 
@@ -4634,7 +4672,7 @@ async function reconcileNpmDeprecation(pkg, dep, was, dry) {
     for (const version of Object.keys(was.versions)) {
       if (declared(version) || !published(version) || !current[version]) continue
       print(dry, 'npm-undeprecate', pkg + '@' + version, 'no longer declared, clear deprecation')
-      if (!dry) await npm(['deprecate', pkg + '@' + version, ''])
+      if (!dry) await npmDeprecate(pkg + '@' + version, '')
       current[version] = ''
     }
   }
