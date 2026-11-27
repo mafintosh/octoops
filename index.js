@@ -4105,7 +4105,7 @@ async function reconcileNpmTrust(org, repo, prev, dry, done, opts) {
       // is left to expire rather than recreated every window. its entry and
       // clock stay, lifting the deprecation makes it overdue at once and the
       // next apply judges it
-      if (normalizeNpmDeprecation(npm.deprecated).others) continue
+      if (npmPackageRetired(npm.deprecated)) continue
       await checkNpmTrust(pkg, `${org}/${repo.name}`, desired, trust, dry, opts)
     }
   }
@@ -4246,12 +4246,11 @@ function listNpmTrust(config, statePath) {
       const desired = desiredTrustedPublishers(config.org, repo.name, npm.trustedPublishing)
       if (!desired.length) continue
       const pkg = npmPackageName(npm, repo.name)
-      const dep = normalizeNpmDeprecation(npm.deprecated)
       for (const e of trackPublishers(desired, trust[pkg])) {
         const entry = {
           repo: config.org + '/' + repo.name,
           archived: repo.archived === true,
-          deprecated: !!dep.others,
+          deprecated: npmPackageRetired(npm.deprecated),
           pkg,
           ...e
         }
@@ -4524,6 +4523,14 @@ function normalizeNpmDeprecation(deprecated) {
   return out
 }
 
+// a package nobody means to release again: every version not listed carries a
+// package-level message and no listed version is kept free of one. a version
+// declared with "" is still meant to be installed, so the package is alive
+function npmPackageRetired(deprecated) {
+  const dep = normalizeNpmDeprecation(deprecated)
+  return !!dep.others && Object.values(dep.versions).every((m) => m !== '')
+}
+
 // the npm entries of a raw repo or defaults pack, an entry missing entirely is
 // nothing to check
 function npmEntriesOf(entry) {
@@ -4657,19 +4664,24 @@ async function reconcileNpmDeprecation(pkg, dep, was, dry) {
   const declared = (version) => Object.prototype.hasOwnProperty.call(dep.versions, version)
 
   // package-level: undefined leaves it alone, "" clears it. it is in place when
-  // every version without a message of its own carries it. the command writes
-  // all versions, the declared ones get theirs back below
+  // every version without a message of its own carries it. only the versions
+  // that differ are written, as one range of exact versions, so a declared
+  // version never loses its own message in between. the bare name covers
+  // every version, prereleases included
   if (dep.others !== undefined) {
-    const stale = Object.keys(current).some((v) => !declared(v) && current[v] !== dep.others)
-    if (stale) {
+    const all = Object.keys(current)
+    const stale = all.filter((v) => !declared(v) && current[v] !== dep.others)
+    if (stale.length) {
+      const whole = stale.length === all.length
+      const spec = whole ? pkg : pkg + '@' + stale.join(' || ')
       print(
         dry,
         dep.others ? 'npm-deprecate' : 'npm-undeprecate',
-        pkg,
+        whole ? pkg : pkg + ' (' + stale.length + ' versions)',
         dep.others || 'clear deprecation'
       )
-      if (!dry) await npmDeprecate(pkg, dep.others)
-      for (const version of Object.keys(current)) current[version] = dep.others
+      if (!dry) await npmDeprecate(spec, dep.others)
+      for (const version of stale) current[version] = dep.others
     }
   }
 
