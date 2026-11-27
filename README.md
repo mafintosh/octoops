@@ -1013,7 +1013,7 @@ To manage deprecation per version, use an object. `versions` is a list of versio
 }
 ```
 
-A bare version string (or a missing `message`) sets the default message; `"message": ""` clears that version's deprecation. A version that isn't published yet is skipped with a `deprecate-skip` line and picked up on the next apply. A version a previous apply declared that this one no longer does is cleared (`npm-undeprecate`, "no longer declared"); This also happens when the whole `deprecated` key is removed. Deprecations set by maintainers or publishers are never touched. Switching from a plain message to an object without `others` leaves the unlisted versions deprecated, a `deprecate-keep` line says how many; set `"others": false` to clear them.
+A bare version string (or a missing `message`) sets the default message; `"message": ""` clears that version's deprecation. A version that isn't published yet is skipped with a `skip-deprecate` line and picked up on the next apply. A version a previous apply declared that this one no longer does is cleared (`npm-undeprecate`, "no longer declared"), also when the whole `deprecated` key is removed. Deprecations set by maintainers or publishers are never touched. Switching from a plain message to an object without `others` leaves the unlisted versions deprecated, a `deprecate-keep` line says how many; set `"others": false` to clear them.
 
 `others` only rewrites the versions whose message differs, in a single `npm deprecate` over that exact list, so the versions under `versions` keep their own messages throughout.
 

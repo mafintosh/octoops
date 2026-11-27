@@ -3868,9 +3868,8 @@ async function reconcileNpmBlock(org, repo, prev, dry, done) {
     // so the entry still differs from state and the next apply tries again
     recorded = Array.isArray(repo.npm) ? applied : applied[0]
     // a package gone from the config keeps nothing an apply set up for it.
-    // maintainers and package-level deprecation stay, a package needs an owner
-    // and the deprecation was meant for its users, but publishers are revoked.
-    // version deprecations an apply set up are cleared when the block changes
+    // maintainers and deprecation stay, a package needs an owner and the
+    // deprecation was meant for its users, but publishers are revoked
     const desired = new Set(npms.map((n) => npmPackageName(n, repo.name)))
     for (const was of prevs) {
       const pkg = npmPackageName(was, repo.name)
@@ -3952,7 +3951,7 @@ async function reconcileNpm(org, repoName, npm, was, dry, trust) {
   // a clear-only run does not create the package either: if it is not on npm
   // there is nothing to clear, the registry check says so and the next apply
   // syncs after a real publish
-  if (!dropping || npm.maintainers || npm.deprecated !== undefined) await ensureNpmPackage(pkg, dry)
+  if (tp || npm.maintainers || npm.deprecated !== undefined) await ensureNpmPackage(pkg, dry)
 
   let ok = true
   if (npm.maintainers) {
@@ -4572,6 +4571,7 @@ function validateNpmDeprecated(npm, where) {
   }
   if (d.versions !== undefined && !Array.isArray(d.versions))
     throw new Error('npm.deprecated.versions on ' + where + ' must be a list of versions')
+  const seen = new Set()
   for (const v of d.versions || []) {
     if (typeof v !== 'string') {
       if (!v || typeof v !== 'object' || typeof v.version !== 'string' || !v.version)
@@ -4588,6 +4588,12 @@ function validateNpmDeprecated(npm, where) {
         )
     }
     const version = typeof v === 'string' ? v : v.version
+    // the last of two entries would win silently
+    if (seen.has(version))
+      throw new Error(
+        'npm.deprecated.versions on ' + where + ' lists "' + version + '" more than once'
+      )
+    seen.add(version)
     // a typo is never published, it would keep the entry pending forever
     if (!NPM_VERSION.test(version))
       throw new Error(
@@ -4653,7 +4659,7 @@ async function reconcileNpmDeprecation(pkg, dep, was, dry) {
     current = await npmVersionDeprecations(pkg)
   } catch (err) {
     // a registry hiccup is no reason to guess, the next apply looks again
-    print(dry, 'deprecate-skip', pkg, 'could not read registry: ' + err.message)
+    print(dry, 'skip-deprecate', pkg, 'could not read registry: ' + err.message)
     return null
   }
   if (!current) {
@@ -4709,7 +4715,7 @@ async function reconcileNpmDeprecation(pkg, dep, was, dry) {
     if (!published(version)) {
       print(
         dry,
-        'deprecate-skip',
+        'skip-deprecate',
         pkg + '@' + version,
         'not published yet, will sync on next apply'
       )
