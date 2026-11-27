@@ -1226,10 +1226,13 @@ function validateConfig(config, warn = warnStderr) {
       warn('"renamedFrom" on repo "' + raw.name + '" equals its name and is ignored')
     }
     validateSecretNames(raw.secrets, 'repo "' + (raw.name || '?') + '"')
-    for (const n of npmEntriesOf(raw)) validateNpmDeprecated(n, 'repo "' + (raw.name || '?') + '"')
     if (raw.deleted !== true) {
       // apps can arrive through a defaults pack, so check the merged entry
       const where = 'repo "' + (raw.name || '?') + '"'
+      // so can npm, a deprecation from a defaults pack is checked as merged
+      for (const n of npmEntriesOf(resolveDefaults(raw, config.defaults))) {
+        validateNpmDeprecated(n, where)
+      }
       for (const slug of normalizeRepoApps(resolveDefaults(raw, config.defaults).apps, where)) {
         if (rootApps.has(slug))
           throw new Error(
@@ -1286,6 +1289,7 @@ function validateConfig(config, warn = warnStderr) {
         )
     }
     validateMerging(entry && entry.merging, 'defaults "' + name + '"', warn)
+    for (const n of npmEntriesOf(entry)) validateNpmDeprecated(n, 'defaults "' + name + '"')
   }
 }
 
@@ -3923,6 +3927,27 @@ async function reconcileNpm(org, repoName, npm, was, dry, trust) {
     return { ok: true, applied: npm }
   }
 
+  // the deprecation reconcile, the previous entry is the clear-set for version
+  // deprecations, so it runs on a previous state even when this one declares
+  // nothing
+  const syncDeprecation = async () => {
+    const pending = await reconcileNpmDeprecation(
+      pkg,
+      normalizeNpmDeprecation(npm.deprecated),
+      clearing ? normalizeNpmDeprecation(was.deprecated) : null,
+      dry
+    )
+    return appliedNpm(npm, was, pending)
+  }
+
+  // only the deprecation differs from what the last apply recorded, as when a
+  // declared version is still waiting to be published. the package,
+  // maintainers and publishers are in place already, so they are not looked at
+  // again, and nobody is asked to log in to npm for them on every apply
+  if (was && !dropping && !changed(withoutDeprecation(npm), withoutDeprecation(was))) {
+    return { ok: true, applied: await syncDeprecation() }
+  }
+
   // a package that only loses its publishers exists already, no need to look.
   // a clear-only run does not create the package either: if it is not on npm
   // there is nothing to clear, the registry check says so and the next apply
@@ -3934,18 +3959,8 @@ async function reconcileNpm(org, repoName, npm, was, dry, trust) {
     ok = await reconcileNpmMaintainers(pkg, npm.maintainers, dry)
   }
 
-  // the previous entry is the clear-set for version deprecations, so the
-  // reconcile runs on a previous state even when this one declares nothing
   let applied = npm
-  if (npm.deprecated !== undefined || clearing) {
-    const pending = await reconcileNpmDeprecation(
-      pkg,
-      normalizeNpmDeprecation(npm.deprecated),
-      clearing ? normalizeNpmDeprecation(was.deprecated) : null,
-      dry
-    )
-    applied = appliedNpm(npm, was, pending)
-  }
+  if (npm.deprecated !== undefined || clearing) applied = await syncDeprecation()
 
   if (dropping) await dropTrustedPublishers(pkg, `${org}/${repoName}`, trust, dry)
   if (!tp) return { ok, applied }
@@ -4516,7 +4531,12 @@ function npmEntriesOf(entry) {
   return Array.isArray(entry.npm) ? entry.npm : [entry.npm]
 }
 
+// a version as npm records it. build metadata is dropped on publish, so a
+// version that carries it would never be found and never stop being retried
+const NPM_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/
+
 function validateNpmDeprecated(npm, where) {
+  if (!npm || typeof npm !== 'object') return
   const d = npm.deprecated
   if (d === undefined) return
   if (typeof d === 'string' || typeof d === 'boolean') return
@@ -4546,16 +4566,29 @@ function validateNpmDeprecated(npm, where) {
   if (d.versions !== undefined && !Array.isArray(d.versions))
     throw new Error('npm.deprecated.versions on ' + where + ' must be a list of versions')
   for (const v of d.versions || []) {
-    if (typeof v === 'string') continue
-    if (!v || typeof v !== 'object' || typeof v.version !== 'string' || !v.version)
+    if (typeof v !== 'string') {
+      if (!v || typeof v !== 'object' || typeof v.version !== 'string' || !v.version)
+        throw new Error(
+          'npm.deprecated.versions on ' +
+            where +
+            ' must be version strings or { "version", "message" }'
+        )
+      if (v.message !== undefined && typeof v.message !== 'string')
+        throw new Error(
+          'npm.deprecated.versions message on ' +
+            where +
+            ' must be a string, "" clears that version'
+        )
+    }
+    const version = typeof v === 'string' ? v : v.version
+    // a typo is never published, it would keep the entry pending forever
+    if (!NPM_VERSION.test(version))
       throw new Error(
         'npm.deprecated.versions on ' +
           where +
-          ' must be version strings or { "version", "message" }'
-      )
-    if (v.message !== undefined && typeof v.message !== 'string')
-      throw new Error(
-        'npm.deprecated.versions message on ' + where + ' must be a string, "" clears that version'
+          ' has "' +
+          version +
+          '", which is not a version like 1.2.3 or 1.2.3-beta.1'
       )
   }
 }
@@ -4640,6 +4673,24 @@ async function reconcileNpmDeprecation(pkg, dep, was, dry) {
     }
   }
 
+  // a package-level message from before stays on every version not listed
+  // when this entry leaves "others" out. that follows the config, but whoever
+  // narrowed a deprecation down to some versions likely meant to lift the rest
+  if (was && was.others && dep.others === undefined) {
+    const kept = Object.keys(current).filter((v) => !declared(v) && current[v] === was.others)
+    if (kept.length) {
+      print(
+        dry,
+        'deprecate-keep',
+        pkg,
+        kept.length +
+          ' unlisted versions keep "' +
+          was.others +
+          '", set "others": false to clear them'
+      )
+    }
+  }
+
   const pending = []
   for (const version of Object.keys(dep.versions)) {
     const message = dep.versions[version]
@@ -4678,6 +4729,11 @@ async function reconcileNpmDeprecation(pkg, dep, was, dry) {
   }
 
   return pending
+}
+
+function withoutDeprecation(entry) {
+  const { deprecated, ...rest } = entry
+  return rest
 }
 
 // the entry as state may record it. deprecations that did not land are left
